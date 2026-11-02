@@ -1,3 +1,4 @@
+# Создаётся автоматически из mkdocs.base.yml и Notion. Не править вручную.
 # Базовые настройки сайта. Файл mkdocs.yml создаётся автоматически
 # скриптом scripts/sync.mjs (база + меню из Notion) — правьте этот файл.
 site_name: Сети в квартирах
@@ -30,3 +31,10 @@ markdown_extensions:
 extra_javascript:
   - assets/js/mathjax-config.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+nav:
+  - "Главная": index.md
+  - "Чек-лист обследования": chek-list.md
+  - "Классификация квартир": klassifikaciya.md
+  - "Пошаговый алгоритм": algoritm.md
+  - "Калькулятор подбора": calculator.md
+  - "О проекте и команде": o-proekte.md
