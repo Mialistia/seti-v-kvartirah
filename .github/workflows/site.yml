@@ -1,0 +1,33 @@
+name: Сайт из Notion
+on:
+  schedule: [{cron: "0 * * * *"}]   # каждый час
+  workflow_dispatch:                 # кнопка «Run workflow»
+  push: {branches: [main]}
+permissions: {contents: write, pages: write, id-token: write}
+concurrency: {group: pages, cancel-in-progress: true}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: {name: github-pages, url: "${{ steps.deploy.outputs.page_url }}"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - run: npm install --no-audit --no-fund
+      - run: node scripts/sync.mjs
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DB: ${{ secrets.NOTION_DB }}
+      - name: Сохранить Markdown в репозиторий
+        run: |
+          git config user.name "notion-sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs mkdocs.yml
+          git diff --cached --quiet || (git commit -m "Синхронизация из Notion" && git push)
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install mkdocs-material && mkdocs build
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: site}
+      - id: deploy
+        uses: actions/deploy-pages@v4
