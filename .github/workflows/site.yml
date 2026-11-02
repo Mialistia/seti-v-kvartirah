@@ -1,4 +1,8 @@
 name: Сайт из Notion
+# Источник текстов задаётся переменной репозитория CONTENT_SOURCE
+# (Settings → Secrets and variables → Actions → Variables):
+#   notion (или переменная не задана) — страницы берутся из Notion;
+#   github — Notion не используется, страницы правятся прямо в docs/*.md.
 on:
   schedule: [{cron: "0 * * * *"}]   # каждый час
   workflow_dispatch:                 # кнопка «Run workflow»
@@ -9,25 +13,32 @@ jobs:
   build:
     runs-on: ubuntu-latest
     environment: {name: github-pages, url: "${{ steps.deploy.outputs.page_url }}"}
+    env:
+      FROM_NOTION: ${{ vars.CONTENT_SOURCE != 'github' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: 20}
-      - run: npm install --no-audit --no-fund
-      - run: node scripts/sync.mjs
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        if: env.FROM_NOTION == 'true'
+        with: {node-version: 22}
+      - name: Выгрузка из Notion
+        if: env.FROM_NOTION == 'true'
+        run: |
+          npm install --no-audit --no-fund
+          node scripts/sync.mjs
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DB: ${{ secrets.NOTION_DB }}
       - name: Сохранить Markdown в репозиторий
+        if: env.FROM_NOTION == 'true'
         run: |
           git config user.name "notion-sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs mkdocs.yml
           git diff --cached --quiet || (git commit -m "Синхронизация из Notion" && git push)
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: pip install mkdocs-material && mkdocs build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with: {path: site}
       - id: deploy
         uses: actions/deploy-pages@v4
