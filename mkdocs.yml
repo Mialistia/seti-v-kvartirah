@@ -1,0 +1,32 @@
+# Базовые настройки сайта. Файл mkdocs.yml создаётся автоматически
+# скриптом scripts/sync.mjs (база + меню из Notion) — правьте этот файл.
+site_name: Сети в квартирах
+site_description: Методика подбора и организации сетевого оборудования в квартирах
+copyright: ИРИТ-РтФ УрФУ, Екатеринбург, 2026
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.tabs.link
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle: {icon: material/weather-night, name: Тёмная тема}
+    - scheme: slate
+      primary: indigo
+      toggle: {icon: material/weather-sunny, name: Светлая тема}
+markdown_extensions:
+  - tables
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc: {permalink: true}
+  - pymdownx.arithmatex: {generic: true}
+  - pymdownx.superfences
+  - pymdownx.tasklist: {custom_checkbox: true}
+extra_javascript:
+  - assets/js/mathjax-config.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
