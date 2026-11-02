@@ -10,6 +10,7 @@ if (!NOTION_TOKEN || !NOTION_DB) { console.error("Нет NOTION_TOKEN или NOT
 
 const DOCS = "docs";
 const IMG = path.join(DOCS, "assets", "img");
+const IMG_NEW = path.join(DOCS, "assets", "img.new"); // новые картинки, заменяют старые только после успешной выгрузки
 const MARK = "<!-- generated-from-notion -->";
 // Статические страницы из репозитория: [заголовок, файл, место в меню]
 const STATIC = [["Калькулятор подбора", "calculator.md", 5.5]];
@@ -29,7 +30,7 @@ n2m.setCustomTransformer("image", async (block) => {
     if (!res.ok) throw new Error(res.status);
     const ext = (path.extname(new URL(url).pathname) || ".png").toLowerCase();
     const name = block.id.replace(/-/g, "") + ext;
-    await fs.writeFile(path.join(IMG, name), Buffer.from(await res.arrayBuffer()));
+    await fs.writeFile(path.join(IMG_NEW, name), Buffer.from(await res.arrayBuffer()));
     return `![${caption}](assets/img/${name})` + (caption ? `\n\n*${caption}*` : "");
   } catch (e) {
     console.warn("Не скачана картинка", url, e.message);
@@ -56,16 +57,11 @@ async function queryAll() {
 const yq = (s) => JSON.stringify(s); // безопасные кавычки для YAML
 
 async function main() {
-  await fs.mkdir(IMG, { recursive: true });
-  // удаляем страницы, созданные прошлой синхронизацией
-  for (const f of await fs.readdir(DOCS)) {
-    if (!f.endsWith(".md")) continue;
-    const s = await fs.readFile(path.join(DOCS, f), "utf8");
-    if (s.startsWith(MARK)) await fs.unlink(path.join(DOCS, f));
-  }
-  for (const f of await fs.readdir(IMG)) await fs.unlink(path.join(IMG, f));
-
-  const items = [];
+  // Сначала всё выгружаем в память. Если Notion недоступен или упал на середине,
+  // старые страницы и картинки в репозитории остаются нетронутыми.
+  await fs.rm(IMG_NEW, { recursive: true, force: true });
+  await fs.mkdir(IMG_NEW, { recursive: true });
+  const items = [], files = [];
   for (const page of await queryAll()) {
     const pr = page.properties;
     const title = text(pr["Название"]);
@@ -74,11 +70,23 @@ async function main() {
     const section = pr["Раздел"]?.select?.name ?? null;
     const md = n2m.toMarkdownString(await n2m.pageToMarkdown(page.id)).parent ?? "";
     const date = new Date(page.last_edited_time).toLocaleDateString("ru-RU", { timeZone: "Asia/Yekaterinburg" });
-    const body = `${MARK}\n# ${title}\n\n${md.trim()}\n\n---\n*Обновлено: ${date}*\n`;
-    await fs.writeFile(path.join(DOCS, `${slug}.md`), body);
+    files.push([`${slug}.md`, `${MARK}\n# ${title}\n\n${md.trim()}\n\n---\n*Обновлено: ${date}*\n`]);
     items.push({ title, file: `${slug}.md`, order, section });
     console.log("OK", slug, "—", title);
   }
+  if (!files.length) throw new Error("Из Notion не пришло ни одной опубликованной страницы — ничего не меняю");
+
+  // Выгрузка успешна: заменяем страницы, созданные прошлой синхронизацией
+  for (const f of await fs.readdir(DOCS)) {
+    if (!f.endsWith(".md")) continue;
+    const s = await fs.readFile(path.join(DOCS, f), "utf8");
+    if (s.startsWith(MARK)) await fs.unlink(path.join(DOCS, f));
+  }
+  for (const [f, body] of files) await fs.writeFile(path.join(DOCS, f), body);
+  await fs.rm(IMG, { recursive: true, force: true });
+  await fs.rename(IMG_NEW, IMG);
+  await fs.writeFile(path.join(IMG, ".gitkeep"), "");
+
   for (const [title, file, order] of STATIC) items.push({ title, file, order, section: null });
   items.sort((a, b) => a.order - b.order);
 
