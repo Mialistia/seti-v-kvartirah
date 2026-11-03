@@ -1,9 +1,12 @@
-// Выгрузка страниц из базы Notion «Страницы сайта» в docs/*.md и сборка меню mkdocs.yml.
-// Переменные окружения: NOTION_TOKEN (токен интеграции), NOTION_DB (ID базы).
+// Выгрузка страниц из базы Notion «Страницы сайта» в docs/*.md и сборка меню mkdocs.yml,
+// а также базы «Оборудование К Телеком» в docs/assets/data/equipment.json (для калькулятора).
+// Переменные окружения: NOTION_TOKEN (токен интеграции), NOTION_DB (ID базы страниц),
+// NOTION_EQUIPMENT_DB (ID базы оборудования; необязательно, по умолчанию — база проекта).
 import { Client } from "@notionhq/client";
 import { NotionToMarkdown } from "notion-to-md";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fromNotionPage, toJson, EQUIPMENT_DB_DEFAULT, EQUIPMENT_FILE } from "./equipment.mjs";
 
 const { NOTION_TOKEN, NOTION_DB } = process.env;
 if (!NOTION_TOKEN || !NOTION_DB) { console.error("Нет NOTION_TOKEN или NOTION_DB"); process.exit(1); }
@@ -56,6 +59,28 @@ async function queryAll() {
 
 const yq = (s) => JSON.stringify(s); // безопасные кавычки для YAML
 
+// Оборудование для калькулятора. Ошибка здесь не останавливает публикацию:
+// остаётся прежний equipment.json из репозитория.
+async function syncEquipment() {
+  const db = process.env.NOTION_EQUIPMENT_DB || EQUIPMENT_DB_DEFAULT;
+  try {
+    const pages = [];
+    let cursor;
+    do {
+      const r = await notion.databases.query({ database_id: db, start_cursor: cursor, sorts: [{ property: "№", direction: "ascending" }] });
+      pages.push(...r.results);
+      cursor = r.has_more ? r.next_cursor : undefined;
+    } while (cursor);
+    const items = pages.map(fromNotionPage).filter(Boolean);
+    if (!items.length) throw new Error("в базе нет записей с моделью и ценой");
+    await fs.mkdir(path.dirname(EQUIPMENT_FILE), { recursive: true });
+    await fs.writeFile(EQUIPMENT_FILE, toJson(items, "notion"));
+    console.log(`OK оборудование — моделей: ${items.length}`);
+  } catch (e) {
+    console.warn(`::warning::Оборудование не обновлено (оставлен прежний ${EQUIPMENT_FILE}): ${e.message}`);
+  }
+}
+
 async function main() {
   // Сначала всё выгружаем в память. Если Notion недоступен или упал на середине,
   // старые страницы и картинки в репозитории остаются нетронутыми.
@@ -75,6 +100,7 @@ async function main() {
     console.log("OK", slug, "—", title);
   }
   if (!files.length) throw new Error("Из Notion не пришло ни одной опубликованной страницы — ничего не меняю");
+  await syncEquipment();
 
   // Выгрузка успешна: заменяем страницы, созданные прошлой синхронизацией
   for (const f of await fs.readdir(DOCS)) {

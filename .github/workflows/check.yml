@@ -20,6 +20,7 @@ jobs:
         run: |
           node --check docs/assets/js/calc.js
           node tests/calc.test.mjs
+          node tests/equipment.test.mjs
       - name: Выгрузка из Notion (как при публикации)
         if: env.FROM_NOTION == 'true'
         run: |
@@ -30,6 +31,9 @@ jobs:
           NOTION_DB: ${{ secrets.NOTION_DB }}
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
+      - name: Проверка данных оборудования после выгрузки
+        if: env.FROM_NOTION == 'true'
+        run: node tests/equipment.test.mjs
       - name: Сборка MkDocs
         run: pip install mkdocs-material && mkdocs build
       - name: Итог
