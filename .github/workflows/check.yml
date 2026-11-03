@@ -1,0 +1,38 @@
+name: Проверка сборки
+# Запускается на каждый pull request в main: собирает сайт так же, как публикация,
+# но ничего не публикует и ничего не сохраняет. Зелёная галочка — можно сливать.
+on:
+  pull_request: {branches: [main]}
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: "check-${{ github.ref }}", cancel-in-progress: true}
+jobs:
+  build:
+    name: Сборка сайта
+    runs-on: ubuntu-latest
+    env:
+      FROM_NOTION: ${{ vars.CONTENT_SOURCE != 'github' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: {node-version: 22}
+      - name: Проверка калькулятора
+        run: |
+          node --check docs/assets/js/calc.js
+          node tests/calc.test.mjs
+      - name: Выгрузка из Notion (как при публикации)
+        if: env.FROM_NOTION == 'true'
+        run: |
+          npm install --no-audit --no-fund
+          node scripts/sync.mjs
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DB: ${{ secrets.NOTION_DB }}
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - name: Сборка MkDocs
+        run: pip install mkdocs-material && mkdocs build
+      - name: Итог
+        run: |
+          test -f site/index.html
+          echo "Страниц собрано: $(find site -name index.html | wc -l)"

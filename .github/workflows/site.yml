@@ -2,7 +2,9 @@ name: Сайт из Notion
 # Источник текстов задаётся переменной репозитория CONTENT_SOURCE
 # (Settings → Secrets and variables → Actions → Variables):
 #   notion (или переменная не задана) — страницы берутся из Notion;
-#   github — Notion не используется, страницы правятся прямо в docs/*.md.
+#   github — Notion не используется, сайт собирается из docs/*.md ветки main.
+# Ветка main защищена (изменения только через pull request), поэтому снимок
+# страниц из Notion сохраняется не в main, а в отдельную ветку notion-content.
 on:
   schedule: [{cron: "0 * * * *"}]   # каждый час
   workflow_dispatch:                 # кнопка «Run workflow»
@@ -28,13 +30,19 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DB: ${{ secrets.NOTION_DB }}
-      - name: Сохранить Markdown в репозиторий
+      - name: Сохранить снимок страниц в ветку notion-content
         if: env.FROM_NOTION == 'true'
         run: |
           git config user.name "notion-sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs mkdocs.yml
-          git diff --cached --quiet || (git commit -m "Синхронизация из Notion" && git push)
+          git add -A docs mkdocs.yml
+          if git diff --cached --quiet; then
+            echo "Страницы не отличаются от main"
+          else
+            git commit -q -m "Синхронизация из Notion $(TZ=Asia/Yekaterinburg date '+%Y-%m-%d %H:%M')"
+          fi
+          # notion-content = текущий main + последний снимок Notion (перезаписывается каждый час)
+          git push --force origin HEAD:refs/heads/notion-content
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: pip install mkdocs-material && mkdocs build

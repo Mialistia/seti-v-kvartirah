@@ -1,12 +1,16 @@
 # Сайт проекта «Сети в квартирах»
 
-Тексты сайта пишутся в Notion (база «Страницы сайта»). Раз в час GitHub Actions выгружает отмеченные страницы в `docs/*.md`, собирает сайт MkDocs Material и публикует его на GitHub Pages.
+Тексты сайта пишутся в Notion (база «Страницы сайта»). Раз в час GitHub Actions выгружает отмеченные страницы в `docs/*.md`, собирает сайт MkDocs Material и публикует его на GitHub Pages. Снимок выгруженных страниц сохраняется в ветку `notion-content`.
 
 ## Что где лежит
 
 | Путь | Что это |
 |---|---|
-| `.github/workflows/site.yml` | автоматизация: синхронизация, сборка, публикация |
+| `.github/workflows/site.yml` | синхронизация из Notion (каждый час и после слияния), сборка, публикация |
+| `.github/workflows/check.yml` | проверка сборки для каждого pull request |
+| `.github/workflows/backup.yml` | резервная копия: тег `backup-…` и выпуск с архивами |
+| `tests/calc.test.mjs` | контрольные примеры калькулятора |
+| `CHANGELOG.md` | журнал изменений |
 | `scripts/sync.mjs` | выгрузка страниц из Notion и сборка меню |
 | `mkdocs.base.yml` | настройки сайта (правьте его; `mkdocs.yml` создаётся автоматически) |
 | `docs/calculator.md`, `docs/assets/js/calc.js` | калькулятор подбора (не из Notion) |
@@ -38,15 +42,26 @@ pip install mkdocs-material
 mkdocs serve
 ```
 
+## Порядок изменений
+
+Ветка `main` защищена: прямые коммиты, перезапись истории и удаление запрещены.
+
+1. Резервная копия: ветка `backup/ГГГГ-ММ-ДД-ЧЧММ` от текущего `main` (такие ветки и теги `backup-*` нельзя удалить или изменить).
+2. Изменения — в отдельной ветке (`notion-ai/<задача>` или своей), затем pull request в `main`.
+3. Проверка сборки должна быть зелёной; после этого — **Merge**.
+4. После слияния автоматически создаётся тег `backup-ГГГГ-ММ-ДД-ЧЧММ` и выпуск в Releases с архивами.
+
+**Откат:** кнопка **Revert** в слитом pull request; к любой прошлой версии — из ветки `backup/…`, тега или архива в Releases.
+
 ## Работа без Notion
 
-Все страницы после каждой синхронизации хранятся в репозитории (`docs/*.md`), поэтому сайт не зависит от аккаунта Notion.
+Все страницы после каждой синхронизации хранятся в ветке `notion-content` (и в архивах Releases), поэтому сайт не зависит от аккаунта Notion. В `main` страницы из Notion могут быть устаревшими.
 
-**Переключиться на правку в GitHub:** Settings → Secrets and variables → Actions → вкладка **Variables** → New repository variable: `CONTENT_SOURCE` = `github`. После этого Notion не опрашивается, а сайт собирается из `docs/*.md`.
+**Переключиться на правку в GitHub:** сначала перенесите свежие страницы в `main` — Pull requests → New pull request → base `main`, compare `notion-content` → Create → Merge. Затем Settings → Secrets and variables → Actions → вкладка **Variables** → New repository variable: `CONTENT_SOURCE` = `github`. После этого Notion не опрашивается, а сайт собирается из `docs/*.md`.
 
 **Как править страницы без Notion:**
 
-- в браузере: открыть файл в `docs/` → карандаш (Edit) → Commit changes; сайт обновится за 1–2 минуты;
+- в браузере: открыть файл в `docs/` → карандаш (Edit) → Commit changes → «Create a new branch» → pull request → Merge; сайт обновится за 1–2 минуты после слияния;
 - удобнее: на странице репозитория нажать клавишу `.` — откроется github.dev (VS Code в браузере) с предпросмотром Markdown;
 - новая страница: создать `docs/<адрес>.md` и добавить строку в `nav:` файла `mkdocs.yml`.
 
