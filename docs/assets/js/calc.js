@@ -4,6 +4,7 @@
 // пути считаются от адреса calc.js. Функции без DOM (toParams, render, planSvg) проверяются в tests/calc.test.mjs.
 // Подсказки «?» к терминам — glossary.js (подключается до calc.js; без него калькулятор работает без подсказок).
 // План квартиры, карта RSSI и легенда (цвета и толщина стен) — plan.js (подключается до calc.js).
+// Своя планировка в форме (блок A) — layout.js и layout-ui.js (подключаются до calc.js; без них — только типовые планы).
 (function (root) {
   "use strict";
   const NE = root.NetEngine;
@@ -60,6 +61,8 @@
     p.tariff = rng("tariff", "C2 «Тариф, Мбит/с»", 10, 10000, true) ?? 500;
     const area = rng("area", "A2 «Общая площадь, м²»", 15, 300); if (area !== null) p.area = area;
     if (fm.cls) p.cls = fm.cls; else p.rooms = rng("rooms", "A3 «Число комнат»", 0, 5, true) ?? 2;
+    if (fm.plan) { p.plan = fm.plan; p.cls = fm.plan.cls || p.cls; delete p.rooms; }   // своя планировка (layout.js): класс — как у плана
+    for (const e of fm.planErr || []) err.push("Планировка: " + e);
     if (fm.constr) p.constr = fm.constr;
     const lw = rng("L_W1", "B1 «Потери несущей стены, дБ»", 1, 40); if (lw !== null) p.L_W1 = lw;
     const pl = rng("pl_mbps", "D4 «Тест Powerline, Мбит/с»", 1, 2500); if (pl !== null) p.pl_mbps = pl;
@@ -215,7 +218,7 @@
     const kz = lv === 3 ? "1,645" : "1,28";
     h.push(`<h2 id="nc-res">Результат расчёта${q("steps")}</h2>`);
     h.push(table(["Показатель", "Значение"], [
-      [`Код квартиры (Ш2)${q("code")}`, `<b>${esc(s2.code)}</b> — ${esc(R.geom.title)}; класс ${esc(s2.code.split("-")[0])}${q("cls")}; ${f(s2.area, 1)} м², масштаб плана k${q("k")} = ${f(s2.k, 3)}`],
+      [`Код квартиры (Ш2)${q("code")}`, `<b>${esc(s2.code)}</b> — ${esc(R.geom.title)}${s2.own ? ` (${esc(s2.own)})${q("layout")}` : ""}; класс ${esc(s2.code.split("-")[0])}${q("cls")}; ${f(s2.area, 1)} м², масштаб плана k${q("k")} = ${f(s2.k, 3)}`],
       [`Индекс сложности у ввода, I<sub>сл</sub>${q("ic")}`, `${f(s2.ic_A.Ic, 1)} дБ (до помещения «${esc(s2.ic_A.room)}»), допустимо L<sub>доп</sub>${q("ldop")} = ${f(s2.ic_A.Ldop, 1)} дБ → ${s2.ic_A.one_node ? "один узел у ввода может справиться" : "одного узла у ввода мало"}`],
       [`Индекс сложности из центра${q("ic")}`, `${f(s2.ic_B.Ic, 1)} дБ (до «${esc(s2.ic_B.room)}»), L<sub>доп</sub>${q("ldop")} = ${f(s2.ic_B.Ldop, 1)} дБ → ${s2.ic_B.one_node ? "одного узла в центре достаточно" : "одного узла в центре мало"}`],
       [`Требуемая скорость (Ш3)${q("breq")}`, `B<sub>треб</sub> = ${f(s3.B, 1)} Мбит/с; с учётом тарифа B<sub>эфф</sub>${q("beff")} = ${f(s3.Beff, 1)} Мбит/с; устройств N${q("n")} = ${s3.N}`],
@@ -223,6 +226,7 @@
       [`Архитектура по дереву решений (Ш5)${q("arch")}`, a ? `<b>${esc(a.arch)}</b> — ${esc(NE.ARCH_NAME[a.arch])}: TCP<sub>z</sub> ${f(a.TCPz)} Мбит/с, K ${f(kOf(a, lv), 1)} %, P<sub>z</sub> ${f(a.Pz, 1)} дБм, кабель ${f(a.L)} м (эталонный узел${q("ref")})` : "нет — см. предупреждение"],
     ]));
     if (s2.warn) h.push(box("warning", esc(s2.warn)));
+    if (s2.own) h.push(box("note", `Расчёт по своей планировке${q("layout")} — ${esc(s2.own)}: стены, помещения и места узлов заданы в форме. Это прогноз — проверить замерами «до» и «после» (блок H чек-листа, Ш11).`));
     if (R.flag) h.push(box("danger", esc(R.flag)));
     if (!R.robust.stable && R.robust.note) h.push(box("warning", `${esc(R.robust.note)}. Проверка: ${R.robust.variants.map(([l, v]) => `${esc(l)} → ${esc(v ?? "нет")}`).join("; ")}.`));
     if (R.seg_note) h.push(box("note", esc(R.seg_note)));
@@ -280,7 +284,7 @@
   // ---------------------------------------------------------------- страница
   const SRC = document.currentScript && document.currentScript.src;   // адрес calc.js — от него ищем ../data/*.json
   const getJson = (name) => fetch(new URL("../data/" + name, SRC || location.href)).then((r) => { if (!r.ok) throw new Error(name + ": " + r.status); return r.json(); });
-  let eng = null, meta = {}, users = [], lastR = null, ownPending = false;
+  let eng = null, meta = {}, users = [], lastR = null, ownPending = false, LAY = null;   // LAY — блок «Планировка» (layout-ui.js)
   const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
   const row = (code, label, ctl, hint = "") => `<label class="nc-row"><span><b class="nc-code">${code}</b> ${label}${hint ? ` <small>${hint}</small>` : ""}</span>${ctl}</label>`;
   function form(plans) {
@@ -293,6 +297,7 @@ ${row("A2", "Общая площадь, м²" + q("k"), `<input name="area" type
 ${row("A4", "Тип планировки" + q("code"), `<select name="cls">${opt("", "авто — по числу комнат и площади", true)}${Object.keys(PL).map((c) => opt(c, `${c} — ${plans.plans[PL[c]].title} (${PL[c]})`)).join("")}</select>`)}
 ${row("A1", "Тип дома" + q("code"), `<select name="constr">${opt("", "как в типовом плане", true)}${[["П", "П — панельный"], ["М", "М — монолитный"], ["К", "К — кирпичный"], ["С", "С — смешанный"]].map(([v, t]) => opt(v, t)).join("")}</select>`)}
 ${row("B1", "Потери несущей стены на 5 ГГц, дБ" + q("lw1"), `<input name="L_W1" type="number" min="1" max="40" step="0.5" placeholder="по типу дома">`, `пусто — ж/б ${W.W1[1]} дБ, кирпич ${W.W1k[1]} дБ`)}
+<div id="nc-lay" class="nc-lay"></div>
 </fieldset>
 <fieldset><legend>Ввод провайдера и кабель (C, D)</legend>
 ${row("C2", "Тариф, Мбит/с" + q("tariff"), `<input name="tariff" type="number" min="10" max="10000" step="10" value="${d.tariff}">`)}
@@ -341,7 +346,7 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
     const v = (n) => fe.elements[n].value, c = (n) => fe.elements[n].checked;
     const fm = { rooms: v("rooms"), area: v("area"), cls: v("cls"), constr: v("constr"), L_W1: v("L_W1"), tariff: v("tariff"), entry_at: v("entry_at"),
       iptv: c("iptv"), cable_ok: !!v("cable_ok"), pl_mbps: v("pl_mbps"), air160: !!v("air160"), need6: c("need6"), vpn: c("vpn"), level: v("level"),
-      budget: v("budget"), dev: {}, user: users };
+      budget: v("budget"), dev: {}, user: users, plan: LAY ? LAY.value() : null, planErr: LAY ? LAY.errors() : [] };
     for (const k of DEV_KEYS) fm.dev[k] = v("dev_" + k);
     return fm;
   }
@@ -364,6 +369,7 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
     try { lastR = eng.calc(p); } catch (e) { er.textContent = "Ошибка расчёта: " + e.message; out.innerHTML = ""; dl.hidden = true; lastR = null; return null; }
     out.innerHTML = render(lastR, meta);
     dl.hidden = false;
+    if (LAY) LAY.ran();
     const box = out.querySelector(".nc-pv"), uid = box ? box.id.slice(6) : null;
     const s = o.pick && uid ? pick(lastR, o.pick, "own") : null;
     if (s) pvShow(uid, s);
@@ -410,6 +416,13 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
     meta = { updated: cat.updated, kt: items.filter((i) => i.src === "К Телеком").length };
     el.innerHTML = form(plans);
     const fe = el.querySelector("#nc-form");
+    // данные формы изменены после расчёта — предупредить, что результат устарел (пересчёт — по кнопке)
+    const stale = () => { const out = el.querySelector("#nc-out"); if (!lastR || out.querySelector(".nc-stale")) return;
+      out.insertAdjacentHTML("afterbegin", `<div class="admonition warning nc-stale" role="status"><p>Данные формы изменены — результат ниже устарел. <button type="button" class="nc-lay-b nc-rerun">Пересчитать</button></p></div>`); };
+    LAY = root.NetLayout && root.NetLayout.mount ? root.NetLayout.mount(el.querySelector("#nc-lay"), { plans, form: fe, eng, hasResult: () => !!lastR, run: () => run(el), onChange: stale }) : null;
+    const chg = (ev) => { if (!ev.target.closest("#nc-own, #nc-lay")) stale(); };
+    fe.addEventListener("input", chg); fe.addEventListener("change", chg);
+    el.querySelector("#nc-out").addEventListener("click", (ev) => { if (ev.target.closest(".nc-rerun")) run(el); });
     fe.addEventListener("submit", (ev) => { ev.preventDefault(); run(el); });
     el.querySelector("#nc-uadd").addEventListener("click", () => {
       const msg = el.querySelector("#nc-umsg"), u = readUser(fe);
@@ -433,7 +446,7 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
       const { map, ...R } = lastR;
       if (R.kt && R.kt.plan) R.kt = { ...R.kt, plan: { ...R.kt.plan, map: undefined } };   // карта покрытия в JSON не нужна
       const url = URL.createObjectURL(new Blob([JSON.stringify(R, null, 1)], { type: "application/json" }));
-      const a = document.createElement("a"); a.href = url; a.download = `raschet_${R.sh2.code}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const a = document.createElement("a"); a.href = url; a.download = `raschet_${R.sh2.own ? R.sh2.code.replace(/-\*-|\*/g, (m) => (m.length > 1 ? "-" : "")) + "_svoy" : R.sh2.code}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
   // «Аналоги ▾», переключатель вариантов и «на план» — и на странице, и в окне «На весь экран» (таблица переносится туда); ссылка на G3 раскрывает блок

@@ -6,7 +6,7 @@
 // Совпадение с эталоном на Python — 31 контрольный пример (tests/fixtures/cases_i4_base.json, cases_i4_spec.json; tests/engine.test.mjs).
 (function (root) {
   "use strict";
-  const VERSION = "engine_i4 1.3 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt); 1.3: R.planFor — план и Ш6–Ш8, Ш12 для любого варианта, R.geom.wt — потери стен плана; расчёт И4 не изменился
+  const VERSION = "engine_i4 1.4 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt); 1.3: R.planFor — план и Ш6–Ш8, Ш12 для любого варианта, R.geom.wt — потери стен плана; 1.4: своя планировка q.plan (layout.js), код со «*»; расчёт И4 не изменился
   const REF_VERSION = "engine_i4 1.0 (04.11.2026)";   // версия эталона на Python (tests/fixtures): 31 пример И4
   // ---------------------------------------------------------------- константы (источники — отчёт И4, табл. 2)
   const BANDS = { "2,4": 2437.0, "5": 5500.0, "6": 6200.0 };      // центральные частоты расчёта, МГц
@@ -148,11 +148,11 @@
       }
       return WT;
     }
-    function geometry(cls, area, constr, L_W1) {
-      const code = PLAN_OF[cls], pl = PLD.plans[code];
-      const S0 = pl.area, S = area ? +area : S0, k = Math.sqrt(S / S0);
+    function geometry(cls, area, constr, L_W1, own) {   // own — своя планировка (layout.js) в формате plans.json, площадь W·H
+      const code = own && PLD.plans[own.base] ? own.base : PLAN_OF[cls], pl = own || PLD.plans[code];
+      const S0 = own ? pl.W * pl.H : pl.area, S = area ? +area : S0, k = Math.sqrt(S / S0);
       const sc = (p) => [pyRound(p[0] * k, 3), pyRound(p[1] * k, 3)];
-      const g = { cls, plan: code, title: pl.title, area: S, area_plan: S0, k, W: pl.W * k, H: pl.H * k, constr: constr || code.slice(-1),
+      const g = { cls, plan: code, own: !!own, title: pl.title || "Своя планировка", area: S, area_plan: S0, k, W: pl.W * k, H: pl.H * k, constr: constr || code.slice(-1),
         rooms: pl.rooms.map(([n, t, rs]) => [n, t, rs.map((r) => r.map((c) => c * k))]),
         walls: pl.walls.map(([a, b, c, d, t]) => [a * k, b * k, c * k, d * k, t]),
         pos: { entry: sc(pl.pos.entry), center: sc(pl.pos.center), sat: pl.pos.sat.map(sc) } };
@@ -494,10 +494,13 @@
         const [lo, hi] = CLASS_AREA[cls];
         if (!(lo <= q.area && q.area <= hi)) warn = `площадь ${fmt(+q.area, 1)} м² вне ориентира класса ${cls} (${lo}–${hi} м²)`;
       }
-      const g = geometry(cls, q.area, q.constr, q.L_W1);
-      const code = `${cls}-${g.plan.split("-")[1]}-${g.constr}`;
+      const own = q.plan && typeof q.plan === "object" ? q.plan : null;
+      if (own && !(Array.isArray(own.rooms) && own.rooms.length && own.pos && (own.pos.sat || []).length)) throw new Error("своя планировка: нет помещений или мест узлов");
+      const g = geometry(cls, q.area, q.constr, q.L_W1, own);
+      const code = `${cls}-${own && !own.base ? "*" : g.plan.split("-")[1]}-${g.constr}${own && own.base ? "*" : ""}`;
       const rt = q.entry_at === "центр" ? g.pos.center : g.pos.entry;
       const sh2 = { cls, code, plan: g.plan, area: pyRound(g.area, 1), k: pyRound(g.k, 3), warn, constr: g.constr, W1: g.WT.W1.map((x) => pyRound(x, 1)) };
+      if (own) sh2.own = own.base ? `изменён типовой план ${own.base}` : "своя планировка с нуля";
       for (const [key, ap] of [["ic_A", rt], ["ic_B", g.pos.center]]) {
         const [ic, room] = Ic(g, ap);
         let dmax = -Infinity;
@@ -517,7 +520,7 @@
       const rob = [], W15 = g.WT.W1[1];
       const variants = q.robust === false ? [] : [["S −5 %", { area: g.area * 0.95 }], ["S +5 %", { area: g.area * 1.05 }], ["W1 −2 дБ", { L_W1: W15 - 2 }], ["W1 +2 дБ", { L_W1: W15 + 2 }]];
       for (const [lab, kw] of variants) {
-        const gg = geometry(cls, "area" in kw ? kw.area : g.area, g.constr, "L_W1" in kw ? kw.L_W1 : q.L_W1);
+        const gg = geometry(cls, "area" in kw ? kw.area : g.area, g.constr, "L_W1" in kw ? kw.L_W1 : q.L_W1, own);
         const ar = refTree(gg, q, lv)[1];
         rob.push([lab, ar ? ar.arch : null]);
       }
@@ -698,7 +701,7 @@
       // потери стен плана (И2, табл. 4; с учётом типа дома и замера B1): тип → [2,4; 5; 6 ГГц], дБ — для легенды плана
       const wt = {};
       for (const w of g.walls) if (w[4] !== "O" && g.WT[w[4]]) wt[w[4]] = g.WT[w[4]].map((x) => pyRound(x, 1));
-      R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title, constr: g.constr, wt };
+      R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title, constr: g.constr, own: g.own, wt };
       return R;
     }
     return { calc, K1MAX, catalog: CAT, plans: PLD, medianPrice, userItem, classify, breq, Ldop };

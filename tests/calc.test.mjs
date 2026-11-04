@@ -4,10 +4,13 @@ import fs from "node:fs";
 await import("../docs/assets/js/engine.js");
 await import("../docs/assets/js/glossary.js");
 await import("../docs/assets/js/plan.js");
+await import("../docs/assets/js/layout.js");
+await import("../docs/assets/js/layout-ui.js");   // без DOM ничего не делает — проверка синтаксиса
 await import("../docs/assets/js/calc.js");
-const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary;
+const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary, LA = globalThis.NetLayout;
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
-const eng = NE.create({ plans: read("../docs/assets/data/plans.json"), catalog: read("./fixtures/equipment_i4.json") });
+const PLD = read("../docs/assets/data/plans.json");
+const eng = NE.create({ plans: PLD, catalog: read("./fixtures/equipment_i4.json") });
 const near = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg}: ${a} ≠ ${b}`);
 const top = (t) => t.r[t.r.length - 1];
 
@@ -124,6 +127,62 @@ for (const c of cases) {
     assert.ok(!/undefined|NaN/.test(UI.planView(r, s)), `${c.id}: ${s.x.name} — undefined или NaN`);
   }
 }
+// 10. Своя планировка (layout.js): типовой план, переданный как своя планировка, даёт тот же расчёт (код — со «*»);
+// правки (сдвиг стены, деление, объединение, дверь, с нуля) проходят проверку, узлы — внутри квартиры
+LA.init(PLD);
+const inside = (pl, p) => p[0] >= -1e-9 && p[1] >= -1e-9 && p[0] <= pl.W + 1e-9 && p[1] <= pl.H + 1e-9;
+for (const c of cases) {
+  const r0 = eng.calc(structuredClone(c.input)), pl = LA.fromTemplate(PLD, r0.sh2.cls, r0.sh2.area);
+  assert.deepEqual(LA.check(pl).err, [], `${c.id}: типовой план проходит проверку`);
+  const r1 = eng.calc({ ...structuredClone(c.input), plan: pl });
+  assert.equal(r1.sh2.code, r0.sh2.code + "*", `${c.id}: код своей планировки`);
+  assert.ok(r1.geom.own && /изменён типовой план/.test(r1.sh2.own), c.id);
+  const k = (r) => JSON.stringify([r.sh3 && r.sh3.B, r.rec.opt && [r.rec.opt.id, r.rec.opt.n, r.rec.opt.arch], r.kt.rows.map((v) => v.card.id + v.roles), r.rank.map((x) => [x.id, x.S]), r.counts]);
+  assert.equal(k(r1), k(r0), `${c.id}: расчёт по типовому плану как своей планировке`);
+  if (r0.rec.opt) near(r1.rec.opt.Pz, r0.rec.opt.Pz, 0.11, `${c.id}: P_z (округление координат до 0,1 мм)`);
+  if (r0.sh6) r0.sh6.aps.forEach((a, i) => near(Math.hypot(a[0] - r1.sh6.aps[i][0], a[1] - r1.sh6.aps[i][1]), 0, 0.01, `${c.id}: место узла ${i + 1}`));
+  assert.ok(!/undefined|NaN/.test(UI.render(r1, { updated: "2026-11-03", kt: 21 })), `${c.id}: вывод своей планировки`);
+}
+for (const cls of Object.keys(NE.PLAN_OF)) {
+  const t = LA.fromTemplate(PLD, cls, null), ok = (pl, msg) => { assert.deepEqual(LA.check(pl).err, [], `${cls}: ${msg}`); for (const p of [pl.pos.center, ...pl.pos.sat, pl.pos.entry]) assert.ok(inside(pl, p), `${cls}: ${msg} — узел вне квартиры`); return pl; };
+  assert.ok(LA.same(t, LA.fromTemplate(PLD, cls, null)) && LA.nsatOf(PLD, cls) === t.pos.sat.length, cls);
+  // сдвиг каждой внутренней линии стен на 20 см в пределах допустимого диапазона
+  const lines = new Map();
+  for (const w of t.walls) { const s = LA.wseg(w); if (s && s.c > 0.01 && s.c < (s.o === "v" ? t.W : t.H) - 0.01) lines.set(s.o + s.c, s); }
+  for (const s of lines.values()) {
+    const e = LA.extentAt(t, s.o, s.c, (s.a + s.b) / 2, false); if (!e) continue;
+    const [mn, mx] = LA.range(t, e), c2 = Math.min(mx, Math.max(mn, s.c + 0.2));
+    const m = ok(LA.finish(LA.moveLine(t, e, c2)), `сдвиг линии ${s.o} = ${s.c} → ${c2}`);
+    near(m.rooms.reduce((a, [, , rs]) => a + rs.reduce((b, r) => b + (r[2] - r[0]) * (r[3] - r[1]), 0), 0), t.W * t.H, 1e-6, `${cls}: площадь после сдвига`);
+  }
+  const big = t.rooms.findIndex(([, ty]) => ty === "ж");
+  const sp = ok(LA.splitRoom(t, big, "v", "W2", true), "деление комнаты стеной с дверью");
+  assert.equal(sp.rooms.length, t.rooms.length + 1);
+  const mg = ok(LA.mergeRooms(sp, big, big + 1), "объединение обратно");
+  assert.equal(mg.rooms.length, t.rooms.length);
+  const wi = t.walls.findIndex((w) => w[4] === "W2" && Math.hypot(w[2] - w[0], w[3] - w[1]) >= 1.2);
+  if (wi >= 0) ok(LA.insertDoor(t, wi, null), "дверь в перегородке");
+  const ap = LA.autoPos(t, t.pos.sat.length, PLD.WT, true);
+  assert.equal(ap.sat.length, t.pos.sat.length); for (const p of [ap.center, ...ap.sat]) assert.ok(inside(t, p), `${cls}: расстановка по правилам`);
+  const r = eng.calc({ cls, plan: sp }), sc = LA.rescale(sp, 80);
+  assert.ok(r.sh2.code === NE.PLAN_OF[cls] + "*" && r.rec.opt && !/undefined|NaN/.test(UI.render(r, {})), `${cls}: расчёт по изменённому плану`);
+  near(sc.W * sc.H, 80, 0.01, `${cls}: план под площадь A2`); ok(sc, "пересчёт под площадь");
+}
+// с нуля: прямоугольник, деление стенами, проверка; ошибки проверки и формы
+let nb = LA.blank(PLD, "К3", 60, 7.5, "низ", 0.4);
+assert.deepEqual(LA.check(nb).err, []); assert.equal(nb.rooms.length, 1); near(nb.W * nb.H, 60, 1e-9, "с нуля: площадь");
+nb = LA.splitRoom(LA.splitRoom(nb, 0, "v", "W1", true), 1, "h", "W2", true);
+assert.deepEqual(LA.check(nb).err, []); assert.equal(nb.rooms.length, 3);
+r = eng.calc({ cls: "К3", plan: nb });
+assert.ok(r.sh2.code === "К3-*-П" && /с нуля/.test(r.sh2.own) && r.rec.opt, "код планировки с нуля");
+const broken = structuredClone(nb); broken.rooms[1][2][0][2] += 1;
+assert.ok(LA.check(broken).err.length > 0, "проверка ловит перекрытие и выход за контур");
+assert.throws(() => eng.calc({ cls: "К3", plan: { ...nb, rooms: [] } }), /своя планировка/);
+({ p, err } = UI.toParams({ ...UI.defaults(), area: "60", plan: nb, planErr: [] }));
+assert.deepEqual(err, []); assert.ok(p.plan === nb && p.cls === "К3" && !("rooms" in p), "форма → параметры: своя планировка");
+assert.match(UI.toParams({ ...UI.defaults(), plan: broken, planErr: LA.check(broken).err }).err.join(" | "), /^Планировка: /);
+assert.ok(GL.has("layout") && LA.draw(nb).startsWith("<svg") && LA.draw(nb, { mini: true }).includes('aria-hidden="true"'));
+
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
 const ids = Object.keys(GL.TERMS), grouped = GL.GROUPS.flatMap(([, g]) => g);
 assert.deepEqual([...grouped].sort(), [...ids].sort(), "термины и группы раздела «Термины и обозначения»");
