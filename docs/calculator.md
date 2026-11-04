@@ -4,7 +4,15 @@
 
 Квартира моделируется по типовому плану своего класса (И2), масштабированному по площади. Это прогноз: итог проверяется замерами «до» и «после» (блок H чек-листа, Ш11). Оборудование берётся из базы Notion «Оборудование К Телеком» — парк К Телеком и модели рынка (И3); сайт выгружает её каждый час. Своё оборудование можно добавить в блоке G3: оно рассчитывается наравне с каталогом.
 
+Серый значок **?** рядом с термином показывает краткое пояснение: что это, на что влияет и как считается; щелчок по нему открывает термин в разделе [«Термины и обозначения»](#terms) внизу страницы. Таблицы результата прокручиваются отдельно от страницы, шапка таблицы остаётся на месте, кнопка «На весь экран» открывает таблицу во весь экран.
+
 <div id="netcalc" class="netcalc" markdown="0"><p>Для работы калькулятора нужен JavaScript.</p></div>
+
+## Термины и обозначения {#terms}
+
+Кратко о терминах, сокращениях и обозначениях калькулятора. Источники — отчёты итераций И1, И2, И4 и движок расчёта.
+
+<div id="nc-gloss" class="gl-sec" markdown="0"><p>Для показа терминов нужен JavaScript.</p></div>
 
 <style>
 .netcalc fieldset{border:1px solid var(--md-default-fg-color--lightest);border-radius:6px;margin:0 0 1rem;padding:.3rem .9rem .6rem}
@@ -20,7 +28,6 @@
 .netcalc .nc-own{padding:.2rem 0 0 .6rem}
 .netcalc .nc-err{color:#c62828}
 .netcalc .nc-del{border:0;background:none;color:#c62828;cursor:pointer}
-.netcalc .nc-tw{overflow-x:auto}
 .netcalc .nc-var table{font-size:.85em}
 .netcalc .nc-var td{vertical-align:top}
 .netcalc .nc-note{color:var(--md-default-fg-color--light)}
@@ -38,4 +45,5 @@
 .netcalc .nc-legend i.nc-ln{height:0;border-top:3px dashed #e65100;border-radius:0}
 </style>
 <script src="../assets/js/engine.js"></script>
+<script src="../assets/js/glossary.js"></script>
 <script src="../assets/js/calc.js"></script>
