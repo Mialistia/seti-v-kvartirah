@@ -1,29 +1,80 @@
 /* Общие стили сайта. Подключается в mkdocs.base.yml (extra_css). */
 
-/* ---------- Таблицы: своя прокрутка, закреплённая шапка, «На весь экран» (assets/js/tables.js) ---------- */
+/* ---------- Таблицы (assets/js/tables.js v2): своя прокрутка, закреплённая шапка и столбцы, карточки, сортировка, «На весь экран» ---------- */
 .md-typeset .st-wrap{margin:1em 0}
-.md-typeset .st-bar{display:flex;justify-content:flex-end;margin:0 0 .2rem}
-.st-full,.st-close{display:inline-flex;align-items:center;gap:.25em;font:inherit;font-size:.62rem;line-height:1.2;padding:.2rem .55rem;border:.05rem solid var(--md-default-fg-color--lighter);border-radius:.2rem;background:var(--md-default-bg-color);color:var(--md-default-fg-color--light);cursor:pointer}
+.md-typeset .st-bar{display:flex;align-items:center;justify-content:flex-end;gap:.6rem;margin:0 0 .2rem}
+.st-hint{flex:1;min-width:0;font-size:.62rem;color:var(--md-default-fg-color--light)}
+.st-hint[hidden]{display:none}
+.st-full,.st-close{display:inline-flex;align-items:center;gap:.25em;font:inherit;font-size:.62rem;line-height:1.2;padding:.2rem .55rem;border:.05rem solid var(--md-default-fg-color--lighter);border-radius:.2rem;background:var(--md-default-bg-color);color:var(--md-default-fg-color--light);cursor:pointer;white-space:nowrap}
 .st-full:hover,.st-full:focus-visible,.st-close:hover,.st-close:focus-visible{color:var(--md-accent-fg-color);border-color:var(--md-accent-fg-color)}
+.st-view{position:relative}
+.st-view::before,.st-view::after{content:"";position:absolute;top:0;bottom:0;width:.8rem;z-index:4;pointer-events:none;opacity:0;transition:opacity .15s}
+.st-view::before{left:var(--st-pw,0);background:linear-gradient(to right,rgba(0,0,0,.18),transparent)}
+.st-view::after{right:0;background:linear-gradient(to left,rgba(0,0,0,.18),transparent)}
+.st-view.st-l::before,.st-view.st-r::after{opacity:1}
+[data-md-color-scheme=slate] .st-view::before{background:linear-gradient(to right,rgba(0,0,0,.55),transparent)}
+[data-md-color-scheme=slate] .st-view::after{background:linear-gradient(to left,rgba(0,0,0,.55),transparent)}
 .md-typeset .st-box{max-height:70vh;overflow:auto;touch-action:auto}
-.md-typeset .st-box.st-tall{overscroll-behavior-y:contain}
 .md-typeset .st-box.st-wide{overscroll-behavior-x:contain}
 .md-typeset .st-box:focus-visible{outline:.1rem solid var(--md-accent-fg-color);outline-offset:.1rem}
 .md-typeset .st-box .md-typeset__scrollwrap{margin:0;overflow:visible}
 .md-typeset .st-box .md-typeset__table{display:block;padding:0;margin:0}
 .md-typeset .st-box table[data-st]{display:table;overflow:visible;max-width:none;margin:0}
 .md-typeset table[data-st]>thead>tr>th{position:sticky;top:0;z-index:2;background-color:var(--md-default-bg-color);box-shadow:inset 0 -.05rem 0 var(--md-typeset-table-color)}
+/* числовые столбцы: вправо (если выравнивание не задано в самой таблице), цифры одной ширины */
+.md-typeset table[data-st] [data-st-num]{font-variant-numeric:tabular-nums}
+.md-typeset table[data-st] [data-st-num]:not([style*="text-align"]):not([align]){text-align:right}
+/* подсветка строки при наведении (у закреплённых ячеек — непрозрачный фон) */
+.md-typeset table[data-st]>tbody>tr:hover{background-color:var(--md-typeset-table-color--light)}
+/* закреплённые столбцы — только когда таблица шире области: tables.js ставит data-st-pins (1, 2 или b — только второй)
+   у таблицы и data-st-pin у закреплённых ячеек */
+.md-typeset table[data-st] [data-st-pin]{position:sticky;left:0;z-index:1;background-color:var(--md-default-bg-color);box-shadow:inset -.05rem 0 0 var(--md-typeset-table-color)}
+.md-typeset table[data-st][data-st-pins="2"] [data-st-pin][data-st-col="2"]{left:var(--st-l2,0)}
+.md-typeset table[data-st][data-st-pins="2"] [data-st-pin][data-st-col="1"]{box-shadow:none}
+.md-typeset table[data-st]>thead>tr>th[data-st-pin]{z-index:3;box-shadow:inset -.05rem 0 0 var(--md-typeset-table-color),inset 0 -.05rem 0 var(--md-typeset-table-color)}
+.md-typeset table[data-st][data-st-pins="2"]>thead>tr>th[data-st-pin][data-st-col="1"]{box-shadow:inset 0 -.05rem 0 var(--md-typeset-table-color)}
+.md-typeset table[data-st]>tbody>tr:hover>[data-st-pin]{background:linear-gradient(var(--md-typeset-table-color--light),var(--md-typeset-table-color--light)) var(--md-default-bg-color)}
+/* сортировка */
+.md-typeset th[aria-sort]{color:var(--md-accent-fg-color)}
+.st-sort{display:inline-block;min-width:1.4em;padding:0 .2em;margin-left:.1em;border:.05rem solid transparent;border-radius:.2rem;background:none;color:var(--md-default-fg-color--light);font:inherit;line-height:1.3;cursor:pointer}
+.st-sort:hover,.st-sort:focus-visible{border-color:var(--md-accent-fg-color);color:var(--md-accent-fg-color);outline:none}
+th[aria-sort]>.st-sort{color:var(--md-accent-fg-color)}
+/* карточки (чек-лист на телефоне) */
+.md-typeset .st-cards{display:none}
+.md-typeset .st-wrap.st-cardmode>.st-view{display:none}
+.md-typeset .st-wrap.st-cardmode>.st-cards{display:block}
+.md-typeset .st-card{margin:0 0 .6rem;padding:.5rem .7rem;border:.05rem solid var(--md-default-fg-color--lightest);border-radius:.2rem}
+.md-typeset .st-card-h{font-weight:700;margin-bottom:.3rem}
+.md-typeset .st-card dl{margin:0}
+.md-typeset .st-card dt{margin-top:.35rem;font-size:.85em;color:var(--md-default-fg-color--light);font-weight:400}
+.md-typeset .st-card dd{margin:.05rem 0 0}
+/* на весь экран */
 html.st-lock{overflow:hidden}
 .st-ovl{position:fixed;inset:0;z-index:9000;display:flex;flex-direction:column;background:var(--md-default-bg-color);color:var(--md-default-fg-color)}
 .st-ovl[hidden]{display:none}
-.st-ovl-bar{display:flex;align-items:center;gap:.8rem;padding:.4rem .8rem;border-bottom:.05rem solid var(--md-default-fg-color--lightest);font-size:.7rem}
-.st-ovl-title{flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-ovl-bar{display:flex;align-items:center;flex-wrap:wrap;gap:.2rem .8rem;padding:.4rem .8rem;border-bottom:.05rem solid var(--md-default-fg-color--lightest);font-size:.7rem}
+.st-ovl-title{flex:1 1 10rem;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-ovl .st-hint{flex:0 1 auto}
 .st-ovl .st-close{font-size:.7rem}
+.st-ovl>.st-view{flex:1;min-height:0;display:flex;flex-direction:column}
 .st-ovl .st-ovl-box{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;margin:0;padding:0 .8rem .8rem}
 .st-ovl .st-ovl-box table[data-st]{display:table;width:100%;max-width:none;overflow:visible;margin:0;font-size:1em}
 .st-ovl .st-ovl-box table[data-st] th,.st-ovl .st-ovl-box table[data-st] td{min-width:0;padding:.45em .7em;overflow-wrap:break-word;hyphens:auto}
 .st-ovl .st-ovl-box td{vertical-align:top}
-@media print{.md-typeset .st-bar{display:none}.md-typeset .st-box{max-height:none;overflow:visible}}
+.st-ovl .st-ovl-box.st-nofit table[data-st]{width:auto}
+.st-ovl .st-ovl-box.st-nofit table[data-st] th{min-width:5rem}
+.st-ovl .st-ovl-box.st-nofit table[data-st] th[data-st-num]{min-width:0}
+.st-ovl .st-ovl-box.st-nofit table[data-st] th,.st-ovl .st-ovl-box.st-nofit table[data-st] td{overflow-wrap:normal;hyphens:manual}
+@media print{
+  .md-typeset .st-bar,.md-typeset .st-cards,.md-typeset .st-wrap.st-cardmode>.st-cards{display:none}
+  .md-typeset .st-wrap.st-cardmode>.st-view{display:block}
+  .md-typeset .st-box{max-height:none;overflow:visible}
+  .st-view::before,.st-view::after{display:none}
+  .md-typeset table[data-st] th,.md-typeset table[data-st] td{position:static!important;box-shadow:none!important}
+  .st-sort{display:none}
+  .md-typeset table[data-st]{width:auto!important;table-layout:auto!important}
+  .md-typeset table[data-st]>thead>tr>th{width:auto!important}
+}
 
 /* ---------- Подсказки «?» и раздел «Термины и обозначения» (assets/js/glossary.js) ---------- */
 .md-typeset a.gl-q,a.gl-q{display:inline;padding:.1em .4em;margin:0 .1em 0 .2em;border-radius:1em;
