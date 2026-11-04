@@ -92,4 +92,5 @@
 <script src="../assets/js/plan.js"></script>
 <script src="../assets/js/layout.js"></script>
 <script src="../assets/js/layout-ui.js"></script>
+<script src="../assets/js/layout-img.js"></script>
 <script src="../assets/js/calc.js"></script>
