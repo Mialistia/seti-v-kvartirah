@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 await import("../docs/assets/js/engine.js");
 await import("../docs/assets/js/glossary.js");
+await import("../docs/assets/js/plan.js");
 await import("../docs/assets/js/calc.js");
 const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary;
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
@@ -63,6 +64,30 @@ assert.equal(r.kt.plan.sh6.aps.length, r.kt.best.n);
 html = UI.render(r, { updated: "2026-11-03", kt: 21 });
 assert.ok(html.includes("условно") && html.includes("проконсультируйтесь со специалистом К Телеком"));
 assert.equal((UI.planSvg({ ...r, ...r.kt.plan }, r.kt.best).match(/<circle /g) || []).length, r.kt.best.n, "на плане — узлы ближайшего варианта К Телеком");
+// Переключатель вариантов на плане: Эконом / Оптимальный / Премиум / «Свой выбор» (R.planFor движка, UI.pick, UI.planView)
+r = eng.calc(p);
+assert.ok(!Object.keys(r).includes("planFor") && !JSON.stringify(r).includes("planFor"), "planFor не попадает в JSON-выгрузку");
+assert.deepEqual(UI.pvButtons(r).map((b) => b.m), ["eco", "opt", "prem"]);
+html = UI.render(r, { updated: "2026-11-03", kt: 21 });
+assert.equal((html.match(/class="nc-pv-b"/g) || []).length, 4, "кнопки: Эконом, Оптимальный, Премиум, Свой выбор");
+assert.equal((html.match(/class="nc-pv-b"[^>]*aria-pressed="true"/g) || []).length, 2, "Эконом и Оптимальный — одна модель: нажаты обе кнопки");
+assert.ok(html.includes('id="nc-own-') && html.includes('value="+own"') && (html.match(/class="nc-pv-pick"/g) || []).length === r.rank.length, "строка «Свой выбор», ввод своего оборудования, «на план» в ранжировании");
+const po = r.planFor(r.rec.opt.id);
+assert.deepEqual([po.plan.sh6, po.plan.sh8, po.plan.sh12, po.plan.map], [r.sh6, r.sh8, r.sh12, r.map], "planFor(оптимальный) = Ш6–Ш8, Ш12 и карта расчёта");
+const prem = UI.pick(r, UI.pvButtons(r)[2].key, "prem");
+assert.equal(prem.x.name, "SNR AX2");
+assert.equal((UI.planSvg(prem.P, prem.x).match(/<circle /g) || []).length, prem.x.n);
+assert.ok(UI.planView(r, prem).startsWith('<p class="nc-pv-cost"><small><b>Премиум</b> — SNR AX2'), "строка стоимости — для выбранного варианта");
+// легенда стен: образцы для каждого типа стены плана и потери на 5 ГГц (И2, табл. 4)
+for (const t of new Set(r.geom.walls.map((w) => w[4]).filter((t) => t !== "O"))) assert.ok(r.geom.wt[t] && html.includes(`— <b>${String(r.geom.wt[t][1]).replace(".", ",")} дБ</b>`), `легенда: стена ${t}`);
+assert.match(html, /несущая ж\/б — <b>13 дБ<\/b>/);
+assert.match(UI.render(eng.calc({ ...p, constr: "К" }), {}), /несущая кирпич — <b>11 дБ<\/b>/);
+// своё оборудование — в «Свой выбор» и на плане
+const ur = eng.calc({ ...p, user: [UI.userParams({ name: "Мой роутер", type: "Mesh-система", std: "6", bands: ["2,4", "5"], wan: "1000", lan: "3", eirp: {}, mesh: "EasyMesh", u: "2", price: "9000", owned: false })] });
+const us = UI.pick(ur, "U1", "own");
+assert.ok(us && us.x.src === "Пользователь" && UI.render(ur, {}).includes('<optgroup label="Своё оборудование (G3)">'), "своё оборудование в списке «Свой выбор»");
+assert.equal((UI.planSvg(us.P, us.x).match(/<circle /g) || []).length, us.x.n);
+assert.ok(UI.ownX(ur, us, 1)[0].includes("Мой роутер") && UI.pvLabel(ur, us) === "Свой выбор");
 // ошибки ввода
 const bad = { ...UI.defaults(), area: "5", tariff: "", dev: { tv: "-1" } };
 err = UI.toParams(bad).err;
@@ -90,6 +115,14 @@ for (const c of cases) {
   assert.ok(r.kt.rows.every((v) => v.card.src === "К Телеком"), `${c.id}: в таблице вариантов только К Телеком`);
   assert.deepEqual(order, r.kt.fb ? ["fb"] : r.kt.rows.length ? order.slice().sort((x, y) => ["eco", "opt", "prem"].indexOf(x) - ["eco", "opt", "prem"].indexOf(y)) : [], `${c.id}: порядок вариантов`);
   if (r.counts.passed_kt) assert.deepEqual([r.kt.best.id, r.kt.best.n, r.kt.best.arch], [r.rec.opt.id, r.rec.opt.n, r.rec.opt.arch], `${c.id}: оптимальный = rec.opt`);
+  // переключатель: каждый вариант кнопок и «Свой выбор» для любой модели ранжирования — узлов на плане = n, без undefined/NaN
+  const s0 = UI.pvDefault(r);
+  if (r.kt.best || r.rec.opt) assert.ok(s0 && s0.x.name === (r.kt.best || r.rec.opt).name, `${c.id}: по умолчанию — рекомендованный вариант`);
+  for (const s of UI.pvButtons(r).map((b) => UI.pick(r, b.key, b.m)).concat(r.rank.map((x) => UI.pick(r, x.id, "own")))) {
+    assert.ok(s && s.P.sh6.aps.length === s.x.n && s.P.map.pts.length > 0, `${c.id}: план варианта`);
+    assert.equal((UI.planSvg(s.P, s.x).match(/<circle /g) || []).length, s.x.n, `${c.id}: узлов на плане — ${s.x.name}`);
+    assert.ok(!/undefined|NaN/.test(UI.planView(r, s)), `${c.id}: ${s.x.name} — undefined или NaN`);
+  }
 }
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
 const ids = Object.keys(GL.TERMS), grouped = GL.GROUPS.flatMap(([, g]) => g);
