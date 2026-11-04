@@ -53,6 +53,7 @@
     pl.walls = pl.walls.map((w) => w.slice(0, 4).map(sc).concat(w[4]));
     pl.pos = { entry: pt(pl.pos.entry), center: pt(pl.pos.center), sat: pl.pos.sat.map(pt) };
     pl.door = (pl.door || []).map(pt); pl.windows = (pl.windows || []).map((w) => w.map(pt));
+    if (pl.bg && pl.bg.m) pl.bg = { ...pl.bg, m: pl.bg.m.map((v) => v * k) };
     return pl;
   }
   const same = (a, b) => !!a && !!b && JSON.stringify([a.rooms, a.walls, a.pos, a.W, a.H]) === JSON.stringify([b.rooms, b.walls, b.pos, b.W, b.H]);
@@ -359,6 +360,21 @@
   }
 
   // ---------------------------------------------------------------- конструктор: весь план, края комнат, обводка прямоугольником, участки стен
+  // подложка — картинка плана: bg = { iw, ih, m: [a, b, c, d, e, f] }; пиксель (u, v) → точка плана (a·u + c·v + e, b·u + d·v + f), м. Картинка — в браузере, в плане — только привязка
+  const bgAt = (m, u, v) => [m[0] * u + m[2] * v + m[4], m[1] * u + m[3] * v + m[5]];
+  function bgMap(bg, f) {   // привязка после отражения, поворота, растяжения (f — то же преобразование точек плана)
+    const o = f(bgAt(bg.m, 0, 0)), x = f(bgAt(bg.m, 1, 0)), y = f(bgAt(bg.m, 0, 1));
+    return { ...bg, m: [x[0] - o[0], x[1] - o[1], y[0] - o[0], y[1] - o[1], o[0], o[1]].map((v) => Math.round(v * 1e10) / 1e10) };
+  }
+  function bgFit(fr, iw, ih, W, H) {   // рамка fr = [u0, v0, u1, v1] (пиксели картинки) — контур квартиры W × H м
+    const kx = W / (fr[2] - fr[0]), ky = H / (fr[3] - fr[1]);
+    return { iw, ih, m: [kx, 0, 0, ky, -fr[0] * kx, -fr[1] * ky] };
+  }
+  function frameSize(fr, A, L) {   // размеры контура по рамке: по ширине рамки L, м, иначе по площади A, м² (пропорции — как у рамки)
+    const q = (fr[3] - fr[1]) / (fr[2] - fr[0]);
+    if (L) return { W: L, H: L * q };
+    const W = Math.sqrt(A / q); return { W, H: A / W };
+  }
   function mapPlan(pl0, f, W2, H2) {   // перенос всех точек плана f([x, y]) → [x', y'] (отражение, поворот, растяжение)
     const pl = clone(pl0), P = (p) => f(p).map(r4);
     const R = (r) => { const a = P([r[0], r[1]]), b = P([r[2], r[3]]); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; };
@@ -367,6 +383,7 @@
     pl.walls = pl.walls.map((w) => P([w[0], w[1]]).concat(P([w[2], w[3]]), [w[4]]));
     if (pl.pos) pl.pos = { entry: P(pl.pos.entry), center: P(pl.pos.center), sat: pl.pos.sat.map(P) };
     pl.door = (pl.door || []).map(P); pl.windows = (pl.windows || []).map((w) => w.map(P));
+    if (pl.bg && pl.bg.m) pl.bg = bgMap(pl.bg, f);
     return normalize(pl);
   }
   const mirror = (pl, ax) => mapPlan(pl, ax === "x" ? ([x, y]) => [pl.W - x, y] : ([x, y]) => [x, pl.H - y], pl.W, pl.H);   // ax: "x" — слева направо, "y" — сверху вниз
@@ -493,7 +510,7 @@
 
   const api = { fromTemplate, blank, rescale, same, wseg, bounds, openB, junctions, extentAt, range, moveLine, normalize, splitRoom, neighbors, mergeRooms,
     setRoom, setWall, addWall, insertDoor, autoPos, roomAt, check, draw, entryOf, nsatOf, finish, RT, WTYPES, MIN, SNAP, DOOR,
-    mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, pieces, setPieces, doorIn, badRooms, RNAME, WALL, WNAME, RF, STEP,
+    mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, pieces, setPieces, doorIn, badRooms, bgAt, bgFit, frameSize, RNAME, WALL, WNAME, RF, STEP,
     init: (PLD) => { PL_DATA = PLD; },
     _: { EPS, eq, r4, clone, esc, fm, q, wname, area, big, mkW, onLine, segDist } };   // для layout-ui.js
   root.NetLayout = api;

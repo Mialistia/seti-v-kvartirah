@@ -6,6 +6,7 @@ await import("../docs/assets/js/glossary.js");
 await import("../docs/assets/js/plan.js");
 await import("../docs/assets/js/layout.js");
 await import("../docs/assets/js/layout-ui.js");   // без DOM ничего не делает — проверка синтаксиса
+await import("../docs/assets/js/layout-img.js");
 await import("../docs/assets/js/calc.js");
 const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary, LA = globalThis.NetLayout;
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
@@ -219,6 +220,24 @@ for (const cls of Object.keys(NE.PLAN_OF)) {
     const dd = ok(LA.doorIn(w3, { ...pc, t: "W3" }, m), "дверь в участке"); assert.ok(dd.walls.some((w) => w[4] === "W4" && LA.wseg(w).o === pc.o && eq(LA.wseg(w).c, pc.c) && eq(LA.wseg(w).b - LA.wseg(w).a, LA.DOOR)), `${cls}: дверь ${LA.DOOR} м`);
     const r = eng.calc({ cls, plan: dd }); assert.ok(r.rec.opt && !/undefined|NaN/.test(UI.render(r, {})), `${cls}: расчёт после правки стен`);
   }
+}
+
+// 12. Картинка-подложка: рамка — контур квартиры; привязка следует за отражением, поворотом, шириной и площадью A2
+{
+  const fr = [100, 50, 900, 650], d = LA.frameSize(fr, 60, null), dL = LA.frameSize(fr, null, 8);
+  near(d.W * d.H, 60, 1e-9, "по площади: площадь"); near(d.W / d.H, 800 / 600, 1e-9, "по площади: пропорции рамки"); assert.ok(dL.W === 8 && Math.abs(dL.H - 6) < 1e-9, "по ширине рамки");
+  const bp = LA.blank(PLD, "К3", 60, d.W, "низ", 0.4); bp.bg = LA.bgFit(fr, 1000, 700, bp.W, bp.H);
+  const at = (pl, u, v) => LA.bgAt(pl.bg.m, u, v), nearP = (a, b, eps, msg) => near(Math.hypot(a[0] - b[0], a[1] - b[1]), 0, eps, msg);
+  nearP(at(bp, 100, 50), [0, 0], 1e-9, "рамка: левый верхний угол — угол контура"); nearP(at(bp, 900, 650), [bp.W, bp.H], 1e-9, "рамка: правый нижний угол");
+  const mx = LA.mirror(bp, "x"), my = LA.mirror(bp, "y"), ro = LA.rotate(bp);
+  nearP(at(mx, 100, 50), [mx.W, 0], 1e-6, "отражение слева направо: подложка"); nearP(at(my, 100, 50), [0, my.H], 1e-6, "отражение сверху вниз: подложка");
+  nearP(at(ro, 100, 50), [ro.W, 0], 1e-6, "поворот: подложка"); nearP(at(ro, 900, 650), [0, ro.H], 1e-6, "поворот: подложка, другой угол");
+  let r4x = bp; for (let i = 0; i < 4; i++) r4x = LA.rotate(r4x);
+  r4x.bg.m.forEach((v, i) => near(v, bp.bg.m[i], 1e-6, "четыре поворота — та же привязка"));
+  const sc = LA.rescale(bp, 75), st = LA.stretch(bp, 8);
+  nearP(at(sc, 900, 650), [sc.W, sc.H], 1e-3, "новая площадь A2: подложка"); nearP(at(st, 900, 650), [st.W, st.H], 1e-6, "другая ширина: подложка");
+  const cv = LA.carve(bp, [1, 1, 3.5, 3], "ж"); assert.deepEqual(cv.bg, bp.bg, "обводка не трогает подложку");
+  assert.deepEqual(LA.check(cv).err, []); assert.ok(LA.same(LA.normalize(structuredClone(cv)), cv));
 }
 
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела

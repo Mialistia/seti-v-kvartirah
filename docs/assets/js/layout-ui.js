@@ -30,7 +30,8 @@
     const PLD = opts.plans, fe = opts.form, F = (n) => fe.elements[n];
     LA.init(PLD);
     const S = { pl: null, base: null, open: false, view: "start", tab: "rooms", sel: null, scope: "one", nt: "W2", nd: true, draw: false, more: false,
-      hist: [], fut: [], drag: null, z: 1, cx: 0, cy: 0, k: 1, note: "", knote: "", undo: null, changed: false, ptr: new Map() };
+      hist: [], fut: [], drag: null, z: 1, cx: 0, cy: 0, k: 1, note: "", knote: "", undo: null, changed: false, ptr: new Map(),
+      img: null, bgOn: true, bgOp: 1 };   // img — картинка-подложка { src, iw, ih } (только в браузере, см. layout-img.js)
     const custom = () => !!S.pl && (!S.base || !LA.same(S.pl, S.base));
     const areaNow = () => { const v = num(F("area").value); return v !== null && v >= 15 && v <= 300 ? v : null; };
     const curCls = () => F("cls").value || opts.eng.classify(F("rooms").value, areaNow())[0];
@@ -51,7 +52,7 @@
       const own = custom(), p = own ? S.pl : LA.fromTemplate(PLD, curCls(), areaNow()), h = [];
       h.push(`<p class="nc-sub"><b>Планировка</b>${q("layout")} — типовая квартира своего класса или своя планировка в конструкторе; общая площадь — как в A2.</p>`,
         `<div class="nc-lay-sum"><button type="button" class="nc-lay-thumb" data-act="open" aria-label="Открыть конструктор квартиры">${LA.draw(p, { mini: true })}</button><div>`);
-      if (own) h.push(`<p><b>Своя планировка</b> — ${p.base ? `изменён типовой план ${esc(p.base)}` : "создана с нуля"}: ${fm(p.W)} × ${fm(p.H)} м, ${fm(p.W * p.H, 1)} м², ` +
+      if (own) h.push(`<p><b>Своя планировка</b> — ${p.base ? `изменён типовой план ${esc(p.base)}` : p.bg ? "по картинке" : "создана с нуля"}: ${fm(p.W)} × ${fm(p.H)} м, ${fm(p.W * p.H, 1)} м², ` +
         `помещений — ${p.rooms.length}. Расчёт ведётся по ней, код квартиры — со «*».</p>`);
       else { const c = curCls(), t = typ(c), A = areaNow();
         h.push(`<p>Типовой план <b>${esc(NE.PLAN_OF[c])}</b> — ${esc(t.title)}${A ? `, под площадь ${fm(A, 1)} м² (масштаб k = ${fm(Math.sqrt(A / t.area), 3)})` : `, ${fm(t.area, 1)} м²`}` +
@@ -91,7 +92,8 @@
       S.undo = { pl: S.pl, why }; S.pl = null; S.base = null; S.hist = []; S.fut = []; S.sel = null; S.note = "";
     }
     const download = (obj, name) => { const u = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 1)], { type: "application/json" })), a = document.createElement("a"); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); };
-    const saveFile = () => { if (custom()) download({ netcalc_plan: 1, saved: new Date().toISOString(), plan: S.pl }, `planirovka_${S.pl.base || "svoya"}.json`); };
+    const bare = (p) => { const c = clone(p); delete c.bg; return c; };   // без привязки картинки: в расчёт и в файл
+    const saveFile = () => { if (custom()) download({ netcalc_plan: 1, saved: new Date().toISOString(), plan: bare(S.pl) }, `planirovka_${S.pl.base || "svoya"}.json`); };
 
     // ------------------------------------------------------------ конструктор: окно поверх страницы
     function openK(view) {
@@ -113,7 +115,12 @@
       const b = $h('[data-act="open"].nc-lay-b'); if (b) b.focus({ preventScroll: true }); else if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
     }
     const $k = (s) => K.querySelector(s);
+    // точки расширения: layout-img.js (по картинке), layout-net.js (роутер) — подключаются после этого файла, до calc.js
+    const X = { S, F, PLD, opts, LA, NE, host, B, FB, IC, SIDES, RSHORT, num, r2, cm, $k, $h, K: () => K, paint: () => paint(), stage: (l) => stage(l), render: () => render(),
+      commit: (np, sel) => commit(np, sel), changed: () => changed(), tryDo, drop: (w) => drop(w), curCls, areaNow, typ, vb: (p) => vb(p), geo, custom,
+      tabs: [["rooms", "Комнаты"], ["walls", "Стены"]], views: {}, tab: {}, drags: {}, acts: {}, cards: [], planSide: [], onChange: [], onInput: [], layers: { under: [], over: [] } };
     function stat() {   // строка состояния: площадь помещений и проверка плана
+      const v = X.views[S.view]; if (v) return v.stat();
       const p = S.pl; if (!p) return "";
       const c = LA.check(p), sum = p.rooms.reduce((s, r) => s + r[2].reduce((t, x) => t + area(x), 0), 0);
       if (c.err.length) return `<span class="kq-bad">⚠ ${esc(c.err[0])}${c.err.length > 1 ? ` и ещё ${c.err.length - 1}` : ""}</span>`;
@@ -129,15 +136,18 @@
       if (!K) return;
       const ae = document.activeElement, key = ae && K.contains(ae) ? focusKey(ae) : null, side = S.built === S.view + S.tab ? $k(".kq-side") : null, st = side ? side.scrollTop : 0;
       if (S.built !== S.view + S.tab) {
-        K.innerHTML = topHtml() + (S.view === "start" ? `<div class="kq-start"></div>` :
-          `<div class="kq-tabs" role="tablist" aria-label="Режим">${[["rooms", "Комнаты"], ["walls", "Стены"]].map(([t, n]) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}">${n}</button>`).join("")}</div>` +
+        const zoom = `<div class="kq-zoom">${B("zin", "+", ' aria-label="Крупнее"')}${B("zout", "−", ' aria-label="Мельче"')}${B("zfit", IC.fit, ' aria-label="Целиком"')}</div>`;
+        K.innerHTML = topHtml() + (S.view === "start" ? `<div class="kq-start"></div>` : X.views[S.view] ?
+          `<div class="kq-main"><div class="kq-stage"><div class="kq-cv" aria-label="${esc(X.views[S.view].label || "Рисунок")}" role="img"></div><p class="kq-hint"></p>${zoom}</div><aside class="kq-side"></aside></div>` :
+          `<div class="kq-tabs" role="tablist" aria-label="Режим">${X.tabs.map(([t, n]) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}">${n}</button>`).join("")}</div>` +
           `<div class="kq-main"><div class="kq-stage"><div class="kq-cv" aria-label="План квартиры" role="img"></div><p class="kq-hint"></p>` +
-          `<div class="kq-zoom">${B("zin", "+", ' aria-label="Крупнее"')}${B("zout", "−", ' aria-label="Мельче"')}${B("zfit", IC.fit, ' aria-label="Весь план"')}</div></div><aside class="kq-side"></aside></div>`);
+          `${zoom}</div><aside class="kq-side"></aside></div>`);
         S.built = S.view + S.tab;
       }
       $k(".kq-stat").innerHTML = stat();
       const m = $k(".kq-menu"); m.hidden = !S.more; const mb = $k('[data-act="more"]'); if (mb) mb.setAttribute("aria-expanded", String(S.more));
       if (S.view === "start") { $k(".kq-start").innerHTML = startHtml(); }
+      else if (X.views[S.view]) { stage(); const sd = $k(".kq-side"); sd.innerHTML = X.views[S.view].side(); sd.scrollTop = st; }
       else {
         $k('[data-act="undo"]').disabled = !S.hist.length; $k('[data-act="redo"]').disabled = !S.fut.length;
         stage(); const sd = $k(".kq-side"); sd.innerHTML = sideHtml(); sd.scrollTop = st;
@@ -166,6 +176,7 @@
         `<div class="kq-f"><label>Ширина, м <input type="number" class="kq-nw" min="2" max="30" step="0.05" value="${w}"></label><span>длина — <b class="kq-nh">${fm(Ab / w)}</b> м</span></div>` +
         `<div class="kq-f"><label>Входная дверь <select class="kq-nside">${SIDES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></label>` +
         `<label>отступ от угла, м <input type="number" class="kq-noff" min="0" step="0.05" value="0.4"></label></div><p class="kq-err kq-nerr"></p>${B("create", "Создать", ' data-main="1"')}</section>`);
+      h.push(X.cards.map((f) => f()).join(""));
       h.push(`<section class="kq-card"><h3>Открыть сохранённую</h3><p>Файл JSON из конструктора («Сохранить в файл») или JSON-выгрузка расчёта.</p>${B("kload", "Выбрать файл")}` +
         (S.undo ? `<p class="kq-note">${esc(S.undo.why)}</p>${B("restore", "Вернуть прошлую планировку")}` : "") + `</section></div>`);
       if (S.pl) h.push(`<p>${B("back", "← Вернуться к плану")}</p>`);
@@ -200,14 +211,17 @@
       return [pc];
     }
     function stage(light) {
+      if (X.views[S.view]) return X.views[S.view].stage(light);
       const cv = $k(".kq-cv"); if (!cv || !S.pl) return;
       const d = S.drag, p = d && d.pl ? d.pl : S.pl, [x0, y0, w, h] = vb(p);
       const cw = cv.clientWidth || 600, ch = cv.clientHeight || 400; S.k = Math.min(cw / (w * 100), ch / (h * 100));   // пикселей на сантиметр
       const px = (n) => n / S.k, fs = Math.round(Math.min(px(15), Math.max(px(11), Math.min(34, Math.max(18, Math.max(p.W, p.H) * 100 / 28)))));
       const out = [`<svg class="kq-svg" viewBox="${cm(x0)} ${cm(y0)} ${cm(w)} ${cm(h)}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="font-size:${fs}px">`,
         `<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="#fff"/>`];
-      const bad = LA.badRooms(p), selR = S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length ? S.sel.ri : -1;
-      p.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${i === selR ? "#ffe0b2" : RF[t] || "#f5f5f5"}"/>`); });
+      const bad = LA.badRooms(p), selR = S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length ? S.sel.ri : -1, bg = S.img && p.bg && p.bg.m && S.bgOn;
+      if (bg) out.push(`<image href="${S.img.src}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
+      p.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${i === selR ? "#ffe0b2" : RF[t] || "#f5f5f5"}"${bg ? ` fill-opacity="${i === selR ? 0.45 : 0.25}"` : ""}/>`); });
+      for (const f of X.layers.under) f(p, out, px);   // слои расширений под стенами (карта сигнала)
       out.push(`<rect x="0" y="0" width="${cm(p.W)}" height="${cm(p.H)}" fill="none" stroke="#37474f" stroke-width="${px(3)}"/>`);
       for (const wd of p.windows || []) out.push(`<line x1="${cm(wd[0][0])}" y1="${cm(wd[0][1])}" x2="${cm(wd[1][0])}" y2="${cm(wd[1][1])}" stroke="#81d4fa" stroke-width="${px(5)}"/>`);
       for (const b of LA.openB(p)) { const l = mkW(b.o, b.c, b.a, b.b); out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#9e9e9e" stroke-width="${px(1.5)}" stroke-dasharray="${px(5)} ${px(4)}"/>`); }
@@ -255,6 +269,7 @@
         out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="#ff6d00" fill-opacity=".15" stroke="#ff6d00" stroke-width="${px(2.5)}" stroke-dasharray="${px(6)} ${px(4)}"/>`,
           `<text x="${cm((r[0] + r[2]) / 2)}" y="${cm((r[1] + r[3]) / 2)}" class="kq-tip">${fm(r[2] - r[0])} × ${fm(r[3] - r[1])} м</text>`);
       }
+      for (const f of X.layers.over) f(p, out, px);   // слои расширений поверх плана
       out.push(`<text x="${cm(p.W / 2)}" y="${cm(-0.22)}" class="kq-out">${fm(p.W)} м</text><text x="${cm(-0.22)}" y="${cm(p.H / 2)}" class="kq-out" transform="rotate(-90 ${cm(-0.22)} ${cm(p.H / 2)})">${fm(p.H)} м</text>`);
       out.push("</svg>");
       cv.innerHTML = out.join("");
@@ -263,6 +278,7 @@
       if (!light) $k(".kq-hint").textContent = hint();
     }
     function hint() {
+      const v = X.views[S.view] || X.tab[S.tab]; if (v && v.hint) return v.hint();
       if (S.tab === "walls") return S.sel ? "Выберите тип в панели — для этого участка или сразу для группы." : "Нажмите на стену или пунктир между комнатами.";
       if (S.draw) return "Проведите по плану прямоугольник — получится новая комната.";
       return S.sel ? "Тяните оранжевые кружки — соседние комнаты подстроятся." : "Нажмите на комнату, чтобы изменить её.";
@@ -275,6 +291,7 @@
       const c = LA.check(p);
       if (c.err.length) h.push(`<div class="kq-err"><b>Нужно исправить:</b><ul>${c.err.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>`);
       if (c.warn.length) h.push(`<div class="kq-warn"><ul>${c.warn.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>`);
+      if (X.tab[S.tab]) return h.join("") + X.tab[S.tab].side(p);
       if (S.tab === "walls") return h.join("") + wallsSide(p);
       if (S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length) return h.join("") + roomSide(p, S.sel.ri);
       return h.join("") + planSide(p);
@@ -291,6 +308,7 @@
         `<div class="kq-f"><label>Ширина квартиры, м <input type="number" class="kq-W" min="2" max="30" step="0.05" value="${r2(p.W)}"></label><span>длина — ${fm(p.H)} м; площадь ${fm(p.W * p.H, 1)} м² не меняется</span></div>` +
         `<div class="kq-f"><label>Входная дверь <select class="kq-dside">${SIDES.map(([v, t]) => `<option value="${v}"${v === ds.side ? " selected" : ""}>${t}</option>`).join("")}</select></label>` +
         `<label>отступ от угла, м <input type="number" class="kq-doff" min="0" step="0.05" value="${r2(ds.off)}"></label></div>` +
+        X.planSide.map((f) => f(p)).join("") +
         `<h4>Узлы сети</h4><p class="kq-note">Ц — корневой узел, С1, С2 — спутники, □ — ввод кабеля у входной двери. Места: ${p.manual ? "заданы вручную" : p.auto ? "по правилам размещения (Ш6) — пересчитываются после каждой правки" : "типовые (И4)"}.</p>` +
         `<p>${B("auto", "Расставить по правилам")}${B("restart", "Другая типовая или с нуля")}</p>`;
     }
@@ -331,7 +349,8 @@
         const act = b.dataset.act, p = S.pl;
         if (act !== "more") S.more = false;
         tryDo(() => {
-          if (act === "done") closeK();
+          if (X.acts[act]) X.acts[act](b, p);
+          else if (act === "done") closeK();
           else if (act === "more") { S.more = !S.more; paint(); }
           else if (act === "undo" && S.hist.length) { S.fut.push(S.pl); S.pl = S.hist.pop(); S.sel = null; changed(); }
           else if (act === "redo" && S.fut.length) { S.hist.push(S.pl); S.pl = S.fut.pop(); S.sel = null; changed(); }
@@ -376,6 +395,7 @@
       K.addEventListener("change", (ev) => {
         const t = ev.target, p = S.pl;
         tryDo(() => {
+          if (X.onChange.some((f) => f(t, p))) return;
           if (t.matches(".kq-name") && S.sel) commit(LA.setRoom(p, S.sel.ri, t.value));
           else if (t.matches(".kq-nt")) S.nt = t.value;
           else if (t.matches(".kq-nd")) S.nd = t.checked;
@@ -385,6 +405,8 @@
         });
       });
       K.addEventListener("input", (ev) => {
+        const t = ev.target;
+        if (X.onInput.some((f) => f(t))) return;
         if (!ev.target.matches(".kq-nw")) return;
         const A = areaNow() || typ(curCls()).area, w = num(ev.target.value), h = $k(".kq-nh"); if (h) h.textContent = w ? fm(A / w) : "—";
       });
@@ -418,14 +440,17 @@
         return best && best.x;
       }
       K.addEventListener("pointerdown", (ev) => {
-        if (!cvOf(ev) || ev.button > 0 || !S.pl) return;
+        const v = X.views[S.view];
+        if (!cvOf(ev) || ev.button > 0 || (!S.pl && !v)) return;
         const pt = toP(ev); if (!pt) return;
         S.ptr.set(ev.pointerId, [ev.clientX, ev.clientY]);
         try { ev.target.closest(".kq-cv").setPointerCapture(ev.pointerId); } catch (e) { /* нет захвата */ }
         ev.preventDefault();
         if (S.ptr.size === 2) { const [a, b] = [...S.ptr.values()]; S.drag = { kind: "pinch", d0: Math.hypot(a[0] - b[0], a[1] - b[1]), z0: S.z }; stage(true); return; }
-        if (S.tab === "rooms" && S.sel && S.sel.k === "room" && !S.draw) { const e = handleAt(S.pl, pt); if (e) { S.drag = { kind: "edge", id: ev.pointerId, e, v: e.c, pl: null }; stage(true); return; } }
-        if (S.tab === "rooms" && S.draw) { S.drag = { kind: "rect", id: ev.pointerId, p0: pt, p1: pt }; return; }
+        const own = v || X.tab[S.tab], dd = own && own.down ? own.down(pt, ev) : null;   // расширение: своё перетаскивание
+        if (dd) { S.drag = { ...dd, id: ev.pointerId }; stage(true); return; }
+        if (!v && S.tab === "rooms" && S.sel && S.sel.k === "room" && !S.draw) { const e = handleAt(S.pl, pt); if (e) { S.drag = { kind: "edge", id: ev.pointerId, e, v: e.c, pl: null }; stage(true); return; } }
+        if (!v && S.tab === "rooms" && S.draw) { S.drag = { kind: "rect", id: ev.pointerId, p0: pt, p1: pt }; return; }
         S.drag = { kind: "tap", id: ev.pointerId, pt, x0: ev.clientX, y0: ev.clientY, cx: S.cx, cy: S.cy, moved: false };
       });
       K.addEventListener("pointermove", (ev) => {
@@ -437,6 +462,7 @@
         if (d.kind === "edge") { const e = d.e, raw = e.o === "v" ? pt[0] : pt[1], np = LA.moveEdge(S.pl, e, raw), [mn, mx] = LA.range(S.pl, e), v = r4(Math.min(mx, Math.max(mn, Math.round(raw / SNAP) * SNAP)));
           if (!eq(v, d.v)) { d.v = v; d.pl = eq(v, e.c) ? null : np; stage(true); } }
         else if (d.kind === "rect") { d.p1 = pt; stage(true); }
+        else if (X.drags[d.kind]) X.drags[d.kind].move(d, pt);
         else if (d.kind === "tap") {
           const dx = ev.clientX - d.x0, dy = ev.clientY - d.y0;
           if (!d.moved && Math.abs(dx) + Math.abs(dy) > 6) d.moved = true;
@@ -451,7 +477,9 @@
         S.drag = null;
         tryDo(() => {
           if (!ok) { stage(); return; }
-          if (d.kind === "edge") { if (d.pl) commit(LA.finish(geo(d.pl))); else stage(); }
+          if (X.drags[d.kind]) X.drags[d.kind].end(d);
+          else if (X.views[S.view]) stage();
+          else if (d.kind === "edge") { if (d.pl) commit(LA.finish(geo(d.pl))); else stage(); }
           else if (d.kind === "rect") {
             const r = LA.snapRect(S.pl, [d.p0[0], d.p0[1], d.p1[0], d.p1[1]]);
             if (r[2] - r[0] < 0.5 || r[3] - r[1] < 0.5) { S.knote = "Слишком маленький прямоугольник — проведите крупнее (от 0,5 × 0,5 м)."; paint(); return; }
@@ -459,7 +487,8 @@
             S.draw = false; commit(np, ri >= 0 ? { k: "room", ri } : null);
             S.knote = "Новая комната готова — выберите её тип и название."; paint();
           } else if (d.kind === "tap" && !d.moved) {
-            if (S.tab === "walls") { const x = pieceAt(S.pl, d.pt); S.sel = x ? { k: "piece", o: x.o, c: x.c, at: Math.min(x.b, Math.max(x.a, x.o === "v" ? d.pt[1] : d.pt[0])) } : null; S.scope = "one"; }
+            if (X.tab[S.tab]) { if (X.tab[S.tab].tap) X.tab[S.tab].tap(d.pt); }
+            else if (S.tab === "walls") { const x = pieceAt(S.pl, d.pt); S.sel = x ? { k: "piece", o: x.o, c: x.c, at: Math.min(x.b, Math.max(x.a, x.o === "v" ? d.pt[1] : d.pt[0])) } : null; S.scope = "one"; }
             else { const ri = LA.roomAt(S.pl, d.pt); S.sel = ri >= 0 ? { k: "room", ri } : null; }
             S.knote = ""; paint();
           } else stage();
@@ -470,12 +499,12 @@
       K.addEventListener("wheel", (ev) => { if (!cvOf(ev)) return; ev.preventDefault(); zoomBy(ev.deltaY < 0 ? 1.2 : 1 / 1.2, toP(ev)); }, { passive: false });
     }
     function zoomBy(f, at) {
-      const p = S.pl; if (!p) return;
+      const p = X.views[S.view] ? X.views[S.view].box() : S.pl; if (!p) return;
       const [x0, y0, w, h] = vb(p), z2 = Math.min(8, Math.max(1, S.z * f)), c = at || [x0 + w / 2, y0 + h / 2], k = S.z / z2;
       S.cx = c[0] - (c[0] - (x0 + w / 2)) * k; S.cy = c[1] - (c[1] - (y0 + h / 2)) * k; S.z = z2; stage();
     }
     function uniqName(p, ri, t) { const base = RSHORT[t] || "Помещение"; if (!p.rooms.some((r, i) => i !== ri && r[0] === base)) return base; let i = 2; while (p.rooms.some((r, j) => j !== ri && r[0] === `${base} ${i}`)) i++; return `${base} ${i}`; }
-    let rz = 0; root.addEventListener("resize", () => { if (K && S.view === "edit") { cancelAnimationFrame(rz); rz = requestAnimationFrame(() => stage()); } });
+    let rz = 0; root.addEventListener("resize", () => { if (K && S.view !== "start") { cancelAnimationFrame(rz); rz = requestAnimationFrame(() => stage()); } });
 
     // ------------------------------------------------------------ события блока в форме
     host.addEventListener("click", (ev) => {
@@ -516,9 +545,10 @@
       if (!custom()) { S.pl = null; S.note = ""; }
     } catch (e) { S.pl = null; S.note = ""; }
     S.hist = []; S.fut = []; S.knote = "";
+    for (const e of LA.ext || []) e(X);
     render();
     return {
-      value: () => (custom() ? clone(S.pl) : null),
+      value: () => (custom() ? bare(S.pl) : null),
       errors: () => (custom() ? LA.check(S.pl).err : []),
       ran: () => { if (S.changed) { S.changed = false; render(); } },
       state: () => S,
