@@ -3,6 +3,7 @@
 // Данные: ../data/plans.json (типовые планы И2) и ../data/equipment.json (база Notion «Оборудование К Телеком»),
 // пути считаются от адреса calc.js. Функции без DOM (toParams, render, planSvg) проверяются в tests/calc.test.mjs.
 // Подсказки «?» к терминам — glossary.js (подключается до calc.js; без него калькулятор работает без подсказок).
+// План квартиры, карта RSSI и легенда (цвета и толщина стен) — plan.js (подключается до calc.js).
 (function (root) {
   "use strict";
   const NE = root.NetEngine;
@@ -73,69 +74,10 @@
     return { p, err };
   }
 
-  // ---------------------------------------------------------------- план квартиры (SVG): помещения, стены, узлы, кабель, карта RSSI 5 ГГц
-  const RSSI = [[-40, "#006837", "≥ −40"], [-50, "#1a9850", "−50…−40"], [-60, "#66bd63", "−60…−50"], [-67, "#a6d96a", "−67…−60"],
-    [-72, "#fee08b", "−72…−67"], [-80, "#fc8d59", "−80…−72"], [-Infinity, "#d73027", "< −80"]];
-  const rssiColor = (P) => RSSI.find(([t]) => P >= t)[1];
-  const ROOM_FILL = { "ж": "#f5f5f5", "к": "#fff8e1", "с": "#e3f2fd", "п": "#eeeeee", "х": "#e0e0e0" };
-  const WALL = { W1: [16, "#263238"], W2: [10, "#455a64"], W3: [6, "#78909c"], W4: [5, "#a1887f"], W6: [10, "#1565c0"], W7a: [10, "#455a64"], W7b: [16, "#263238"] };
-  const c = (v) => Math.round(v * 100);   // метры → сантиметры: в SVG целые координаты и шрифт обычного размера
-  function crossings(g, a, b) {   // сколько стен пересекает отрезок a–b (дверь — половина)
-    let n = 0;
-    for (const [x1, y1, x2, y2, t] of g.walls) {
-      if (t === "O") continue;
-      const d1 = (b[0] - a[0]) * (y1 - a[1]) - (b[1] - a[1]) * (x1 - a[0]), d2 = (b[0] - a[0]) * (y2 - a[1]) - (b[1] - a[1]) * (x2 - a[0]);
-      const d3 = (x2 - x1) * (a[1] - y1) - (y2 - y1) * (a[0] - x1), d4 = (x2 - x1) * (b[1] - y1) - (y2 - y1) * (b[0] - x1);
-      if (d1 * d2 < 0 && d3 * d4 < 0) n += t === "W4" ? 0.5 : 1;
-    }
-    return n;
-  }
-  function planSvg(R, o) {
-    const g = R.geom, pad = 0.6, out = [];
-    out.push(`<svg class="nc-plan" viewBox="${c(-pad)} ${c(-pad)} ${c(g.W + 2 * pad)} ${c(g.H + 2 * pad)}" xmlns="http://www.w3.org/2000/svg" role="img">`,
-      `<title>${esc(g.title)}: ${o ? "уровень сигнала 5 ГГц для варианта «" + esc(o.name) + "»" : "типовой план"}</title>`,
-      `<rect x="${c(-pad)}" y="${c(-pad)}" width="${c(g.W + 2 * pad)}" height="${c(g.H + 2 * pad)}" fill="#fff"/>`);
-    for (const [, t, rs] of g.rooms) for (const [x0, y0, x1, y1] of rs)
-      out.push(`<rect x="${c(x0)}" y="${c(y0)}" width="${c(x1) - c(x0)}" height="${c(y1) - c(y0)}" fill="${ROOM_FILL[t] || "#f5f5f5"}"/>`);
-    if (o && R.map) {
-      const st = c(R.map.step);
-      out.push(`<g shape-rendering="crispEdges">`);
-      for (const [x, y, P] of R.map.pts) out.push(`<rect x="${c(x) - st / 2}" y="${c(y) - st / 2}" width="${st}" height="${st}" fill="${rssiColor(P)}"/>`);
-      out.push(`</g>`);
-    }
-    for (const [x1, y1, x2, y2, t] of g.walls) {
-      if (t === "O") continue;
-      const [w, col] = WALL[t] || [8, "#546e7a"];
-      out.push(`<line x1="${c(x1)}" y1="${c(y1)}" x2="${c(x2)}" y2="${c(y2)}" stroke="${col}" stroke-width="${w}" stroke-linecap="square"/>`);
-    }
-    for (const [name, , rs] of g.rooms) {
-      const [x0, y0, x1, y1] = rs.reduce((a, r) => ((r[2] - r[0]) * (r[3] - r[1]) > (a[2] - a[0]) * (a[3] - a[1]) ? r : a));
-      out.push(`<text x="${c((x0 + x1) / 2)}" y="${c((y0 + y1) / 2)}" class="nc-room">${esc(name)}</text>`);
-    }
-    const e = g.pos.entry;
-    out.push(`<rect x="${c(e[0]) - 17}" y="${c(e[1]) - 17}" width="34" height="34" fill="#fff" stroke="#e65100" stroke-width="6"/>`,
-      `<text x="${c(e[0])}" y="${c(e[1]) + 48}" class="nc-lab">ввод</text>`);
-    if (o) {
-      o.aps.forEach((a, i) => {
-        if (!o.cable[i]) return;
-        const s = o.arch === "Б" ? e : o.aps[0], pl = o.arch === "В-PL", k1 = [a[0], s[1]], k2 = [s[0], a[1]];   // трасса из двух отрезков: меньше стен
-        const k = crossings(g, s, k1) + crossings(g, k1, a) <= crossings(g, s, k2) + crossings(g, k2, a) ? k1 : k2;
-        out.push(`<polyline points="${c(s[0])},${c(s[1])} ${c(k[0])},${c(k[1])} ${c(a[0])},${c(a[1])}" fill="none" stroke="${pl ? "#6a1b9a" : "#e65100"}" stroke-width="7" stroke-dasharray="${pl ? "5 12" : "25 12"}"/>`);
-      });
-      o.aps.forEach((a, i) => out.push(`<circle cx="${c(a[0])}" cy="${c(a[1])}" r="26" fill="${i ? "#00897b" : "#283593"}" stroke="#fff" stroke-width="6"/>`,
-        `<text x="${c(a[0])}" y="${c(a[1])}" class="nc-ap">${i + 1}</text>`));
-    }
-    out.push("</svg>");
-    return out.join("");
-  }
-  function legend(R, o) {
-    const kpi = R.sh3.kpi;
-    return (o ? `<p class="nc-legend"><b>Уровень сигнала 5 ГГц, дБм</b>${q("rssi")} (медиана): ${RSSI.map(([, col, t]) => `<span><i style="background:${col}"></i>${t}</span>`).join("")}<br>` +
-      `<small>KPI уровня «${esc(kpi.name)}»${q("kpi")} — P<sub>z</sub>${q("pz")} ≥ ${f(kpi.Pz)} дБм в худшей зоне с запасом на замирания z·σ, поэтому медиана на карте должна быть выше порога.</small></p>` : "") +
-      `<p class="nc-legend"><span><i class="nc-sq"></i>ввод кабеля</span><span><i class="nc-dot" style="background:#283593"></i>1 — корневой узел${q("node")}</span>` +
-      `<span><i class="nc-dot" style="background:#00897b"></i>2, 3 — спутники</span><span><i class="nc-ln"></i>кабель (схема трассы)${q("cable")}</span>` +
-      `<span>толщина линии — тип стены: несущая, перегородка, дверь${q("lw1")}</span></p>`;
-  }
+  // ---------------------------------------------------------------- план квартиры (SVG), карта RSSI 5 ГГц и легенда — plan.js
+  const NP = root.NetPlan;
+  if (!NP) throw new Error("calc.js: сначала подключите plan.js");
+  const { planSvg, legend, rssiColor } = NP;
 
   // ---------------------------------------------------------------- результат
   const td = (v) => `<td>${v}</td>`;
@@ -169,7 +111,7 @@
       `<p><small>Другую модель можно проверить в блоке <a href="#nc-own">«Своё оборудование» (G3)</a>${q("own")} — она рассчитывается наравне с каталогом.` +
       `${R.kt.fb ? " Если вариант не устраивает — проконсультируйтесь со специалистом К Телеком." : ""}</small></p></div>`;
   }
-  function variantRows(R, uid) {   // строки К Телеком (Эконом → Оптимальный → Премиум), под каждой — раскрывающиеся «Аналоги»; затем своё оборудование
+  function variantRows(R, uid, s) {   // строки К Телеком (Эконом → Оптимальный → Премиум), под каждой — раскрывающиеся «Аналоги»; «Свой выбор»; своё оборудование
     const rows = [];
     R.kt.rows.forEach((v, i) => {
       const x = v.card, id = `nc-an-${uid}-${i}`, rec = v.roles.includes("opt") || v.roles.includes("fb");
@@ -179,14 +121,97 @@
         `<br><span class="nc-nw"><button type="button" class="nc-an-b" aria-expanded="false" aria-controls="${id}">Аналоги <svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg></button>${q("analog")}</span>`, ...varCells(R, x)] });
       rows.push({ raw: `<tr id="${id}" class="nc-an-row" hidden><td colspan="6">${analogs(R, v)}</td></tr>` });
     });
+    if (typeof R.planFor === "function" && (rows.length || R.rank.length)) rows.push(ownRow(R, uid, s));
     for (const u of R.rec.user || []) rows.push([`<b>Своё</b>${q("own")}`, modelCell(u), ...varCells(R, u)]);
     return rows;
+  }
+  // ---------------------------------------------------------------- переключатель вариантов на плане: Ш4 (карта RSSI), Ш6–Ш8, Ш12, стоимость
+  // Эконом / Оптимальный / Премиум — варианты К Телеком (R.kt.rows; одна модель — обе кнопки нажаты), «Свой выбор» — любая модель из R.rank
+  // (в т. ч. своё оборудование G3). План и разделы варианта — R.planFor(id) движка; рекомендация (R.kt.best) не меняется.
+  const PV = { eco: "Эконом", opt: "Оптимальный", prem: "Премиум", fb: "Ближайший К Телеком", mk: "Лучший с рынка", own: "Свой выбор" };
+  const PV_LONG = { fb: "Ближайший вариант К Телеком (условно)", mk: "Лучший вариант с рынка" };
+  const op = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
+  function pvButtons(R) {   // [{ m — вариант, key — id модели или "fb", x — карточка }]
+    const kt = R.kt, out = [];
+    if (kt.fb && kt.best) out.push({ m: "fb", key: "fb", x: kt.best });
+    else if (kt.rows.length) for (const m of ["eco", "opt", "prem"]) { const v = kt.rows.find((r) => r.roles.includes(m)); if (v) out.push({ m, key: String(v.card.id), x: v.card }); }
+    else if (R.rec.opt) out.push({ m: "mk", key: String(R.rec.opt.id), x: R.rec.opt });
+    return out;
+  }
+  function pick(R, key, m) {   // { m, key, x — карточка варианта, P — R с Ш6–Ш8, Ш12 и картой RSSI этого варианта } или null
+    if (key === null || key === undefined || key === "") return null;
+    key = String(key);
+    const kt = R.kt;
+    let x = null, P = null;
+    if (key === "fb") { if (kt.fb && kt.best) { x = kt.best; P = { ...R, ...kt.plan }; } }
+    else if (R.rec.opt && String(R.rec.opt.id) === key) { x = R.rec.opt; P = R; }   // R.sh6–R.sh12 и R.map — для rec.opt
+    else if (typeof R.planFor === "function") { const r = R.planFor(key); if (r) { x = r.card; P = { ...R, ...r.plan }; } }
+    if (!x) return null;
+    if (!m) { const b = pvButtons(R).find((v) => v.key === key); m = b ? b.m : "own"; }
+    return { m, key, x, P };
+  }
+  function pvDefault(R) {   // рекомендованный вариант: Оптимальный, ближайший вариант парка или лучший с рынка
+    const kt = R.kt;
+    return kt.fb && kt.best ? pick(R, "fb", "fb") : kt.best ? pick(R, kt.best.id, "opt") : R.rec.opt ? pick(R, R.rec.opt.id, "mk") : null;
+  }
+  function pvLabel(R, s) {
+    if (s.m === "own") return PV.own;
+    if (PV_LONG[s.m]) return PV_LONG[s.m];
+    return pvButtons(R).filter((b) => b.key === s.key).map((b) => PV[b.m]).join(" · ") || PV[s.m];
+  }
+  function ownOptions(R, val) {   // модели из «Все подходящие варианты» (№ — место по баллу S) по источникам + ввод своего оборудования
+    const grp = [["К Телеком", "К Телеком"], ["Рынок", "Рынок"], ["Пользователь", "Своё оборудование (G3)"]];
+    let h = op("", "— выберите модель —", !val);
+    for (const [src, t] of grp) {
+      const l = R.rank.map((x, i) => [x, i + 1]).filter(([x]) => x.src === src);
+      if (l.length) h += `<optgroup label="${esc(t)}">` + l.map(([x, i]) => op(x.id, `№ ${i}. ${x.name} × ${x.n}, ${x.arch}, TCP ${f(x.TCPz)}, TCO ${f(x.tco)} ₽`, String(x.id) === String(val))).join("") + "</optgroup>";
+    }
+    return h + `<optgroup label="Нет в списке">${op("+own", "Своё оборудование… — ввести модель (G3)")}</optgroup>`;
+  }
+  function ownX(R, s, uid) {   // ячейки строки «Свой выбор»: модель, схема, TCP, TCO, S
+    const x = s && s.m === "own" ? s.x : null;
+    return x ? [modelCell(x) + (uid ? `<br><a href="#nc-pvh-${uid}" class="nc-pv-go">↓ показано на плане</a>` : ""), ...varCells(R, x)]
+      : [`<small class="nc-note">Любая модель из «Все подходящие варианты» или своё оборудование (G3) — покажется на плане вместе с картой сигнала, узлами, кабелем и паспортом сети.</small>`, "—", "—", "—", "—"];
+  }
+  function ownRow(R, uid, s) {
+    const c = ownX(R, s, uid);
+    return { a: `class="nc-row-v nc-own-r" id="nc-own-${uid}"`, c: [`<b>${PV.own}</b>${q("pick")}`,
+      `<select class="nc-pv-sel" data-uid="${uid}" aria-label="Свой выбор: модель для плана">${ownOptions(R, s && s.m === "own" ? s.key : "")}</select><div class="nc-own-x">${c[0]}</div>`, ...c.slice(1)] };
+  }
+  function pvSwitch(R, uid, s) {   // кнопки над планом и выбор модели для «Свой выбор»
+    const ov = s && s.m === "own" ? s : null;
+    const btn = (m, key, sub, on) => `<button type="button" class="nc-pv-b" data-uid="${uid}" data-m="${m}" data-pv="${esc(key)}" aria-pressed="${on}"><b>${PV[m]}</b><small>${sub}</small></button>`;
+    return `<div class="nc-pvs" role="group" aria-label="Вариант на плане и в разделах Ш6–Ш8, Ш12">` +
+      pvButtons(R).map((b) => btn(b.m, b.key, `${esc(b.x.name)} × ${b.x.n}`, !!s && b.key === s.key)).join("") +
+      btn("own", ov ? ov.key : "", ov ? `${esc(ov.x.name)} × ${ov.x.n}` : "выберите модель", !!ov) + `</div>` +
+      `<label class="nc-pvsel"><span>${PV.own}${q("pick")}:</span><select class="nc-pv-sel" data-uid="${uid}">${ownOptions(R, ov ? ov.key : "")}</select></label>`;
+  }
+  function planView(R, s) {   // стоимость, план с картой RSSI, легенда, размещение, частоты, кабель, паспорт — для варианта s
+    const o = s ? s.x : null, P = s ? s.P : R, h = [];
+    const sg = (v, nd) => (v < 0 ? "−" : "+") + f(Math.abs(v), nd);
+    if (o) {
+      h.push(`<p class="nc-pv-cost"><small><b>${esc(pvLabel(R, s))}</b> — ${esc(o.name)} × ${o.n}, схема ${esc(o.arch)}${q("arch")}: стоимость ${rub(o.capex)}${q("capex")} (оборудование ${rub(o.eq)} + монтаж), электроэнергия за 5 лет ${rub(o.opex)}${q("opex")}, ` +
+        `TCO 5 лет ${rub(o.tco)}${q("tco")}, ${f(o.rub_m2)} ₽/м²${q("rubm2")}; запас к KPI${q("margin")}: P<sub>z</sub> ${sg(o.margin.Pz, 1)} дБ, TCP × ${f(o.margin.TCP, 2)}, ёмкость C${q("c")} × ${f(o.margin.C, 2)}.` +
+        `${s.m === "own" && R.kt.best ? " Рекомендация не меняется — это просмотр другого варианта." : ""}</small></p>`);
+    }
+    h.push(`<div class="nc-planbox">${planSvg(P, o)}</div>`, legend(R, o));
+    if (o) {
+      h.push(`<h3>Размещение, частоты, кабель (Ш6–Ш8)</h3>`);
+      h.push(table([`Узел${q("node")}`, "Роль", "Координаты, м", "Помещение"], o.aps.map((p, i) => [String(i + 1), esc(P.sh6.roles[i]), `${f(p[0], 2)}; ${f(p[1], 2)}`, esc(roomAt(R.geom, p))])));
+      h.push(`<ul>${P.sh7.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`);
+      if (P.sh8.length) h.push(table(["№", "Откуда", "Куда", "Длина, м", `Кабель${q("cable")}`, "Трасса"], P.sh8.map((c) => [c.n, esc(c.frm), esc(c.to), f(c.L), esc(c.cat), esc(c.route)])));
+      else h.push(`<p>Кабель прокладывать не нужно.</p>`);
+      h.push(`<h3>Паспорт сети: что проверить замером (Ш11–Ш12)</h3>`);
+      h.push(table(["Помещение", `Точка замера (центр), м${q("passport")}`, `Ожидаемый уровень 5 ГГц, дБм${q("rssi")}`], P.sh12.points.map((pt) => [esc(pt.room), `${f(pt.x, 2)}; ${f(pt.y, 2)}`, f(pt.P, 1)])));
+      h.push(`<p><small>В худшей зоне: P<sub>z</sub>${q("pz")} ${f(P.sh12.Pz, 1)} дБм, TCP<sub>z</sub>${q("tcp")} ${f(P.sh12.TCPz)} Мбит/с — для уровня «${esc(P.sh12.kpi)}». Замер «после» сравнивается с этими значениями.</small></p>`);
+    }
+    return h.join("\n");
   }
   const archs = (R) => [...new Set(R.kt.rows.map((v) => v.card.arch).concat((R.rec.user || []).map((u) => u.arch)))];
   let UID = 0;
   function render(R, meta = {}) {
     const s2 = R.sh2, s3 = R.sh3, kpi = s3.kpi, lv = R.input.level, a = R.arch_ref, h = [], uid = ++UID;
-    const kt = R.kt, o = kt.best || R.rec.opt, P = kt.plan ? { ...R, ...kt.plan } : R;   // план, частоты, кабель, паспорт — для рекомендованного варианта
+    const kt = R.kt, s0 = pvDefault(R);   // план, частоты, кабель, паспорт — сначала для рекомендованного варианта
     const kz = lv === 3 ? "1,645" : "1,28";
     h.push(`<h2 id="nc-res">Результат расчёта${q("steps")}</h2>`);
     h.push(table(["Показатель", "Значение"], [
@@ -202,7 +227,7 @@
     if (!R.robust.stable && R.robust.note) h.push(box("warning", `${esc(R.robust.note)}. Проверка: ${R.robust.variants.map(([l, v]) => `${esc(l)} → ${esc(v ?? "нет")}`).join("; ")}.`));
     if (R.seg_note) h.push(box("note", esc(R.seg_note)));
     h.push(`<h3>Подобранное оборудование (Ш9)</h3>`);
-    const rows = variantRows(R, uid);
+    const rows = variantRows(R, uid, s0);
     if (rows.length) {
       h.push(table(["Вариант", `Модель${q("src")}`, `Схема${q("arch")}<br><small>узлов${q("node")}, кабель${q("cable")}</small>`,
         `TCP<sub>z</sub>${q("tcp")}, Мбит/с<br><small>P<sub>z</sub>${q("pz")}, K${q("kz")}</small>`, `TCO 5 лет${q("tco")}<br><small>CAPEX${q("capex")}</small>`, `Балл S${q("s")}`], rows, "nc-var"));
@@ -225,21 +250,8 @@
     if (ux.length) h.push(box("note", "Своё оборудование не подошло: " + ux.map((x) => `${esc(x.name)} — ${x.why.map(esc).join("; ")}` +
       (x.best ? ` (лучший расчёт: ${esc(x.best.arch)}, TCP<sub>z</sub> ${f(x.best.TCPz)} Мбит/с, уровень ${x.best.level})` : "") + (x.warn && x.warn.length ? `; ${x.warn.map(esc).join("; ")}` : "")).join(" · ")));
     for (const u of R.rec.user || []) if (u.warn && u.warn.length) h.push(box("warning", `${esc(u.name)}: ${u.warn.map(esc).join("; ")}`));
-    if (o) {
-      h.push(`<p><small>${kt.best ? (kt.fb ? "Ближайший вариант К Телеком" : "Оптимальный") : "Лучший вариант с рынка"} (${esc(o.name)}): стоимость ${rub(o.capex)}${q("capex")} (оборудование ${rub(o.eq)} + монтаж), электроэнергия за 5 лет ${rub(o.opex)}${q("opex")}, ${f(o.rub_m2)} ₽/м²${q("rubm2")}; ` +
-        `запас к KPI${q("margin")}: P<sub>z</sub> +${f(o.margin.Pz, 1)} дБ, TCP × ${f(o.margin.TCP, 2)}, ёмкость C${q("c")} × ${f(o.margin.C, 2)}.</small></p>`);
-    }
-    h.push(`<h3>План квартиры и покрытие (Ш4, Ш6)</h3>`, `<div class="nc-planbox">${planSvg(P, o)}</div>`, legend(R, o));
-    if (o) {
-      h.push(`<h3>Размещение, частоты, кабель (Ш6–Ш8)</h3>`);
-      h.push(table([`Узел${q("node")}`, "Роль", "Координаты, м", "Помещение"], o.aps.map((p, i) => [String(i + 1), esc(P.sh6.roles[i]), `${f(p[0], 2)}; ${f(p[1], 2)}`, esc(roomAt(R.geom, p))])));
-      h.push(`<ul>${P.sh7.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`);
-      if (P.sh8.length) h.push(table(["№", "Откуда", "Куда", "Длина, м", `Кабель${q("cable")}`, "Трасса"], P.sh8.map((c) => [c.n, esc(c.frm), esc(c.to), f(c.L), esc(c.cat), esc(c.route)])));
-      else h.push(`<p>Кабель прокладывать не нужно.</p>`);
-      h.push(`<h3>Паспорт сети: что проверить замером (Ш11–Ш12)</h3>`);
-      h.push(table(["Помещение", `Точка замера (центр), м${q("passport")}`, `Ожидаемый уровень 5 ГГц, дБм${q("rssi")}`], P.sh12.points.map((pt) => [esc(pt.room), `${f(pt.x, 2)}; ${f(pt.y, 2)}`, f(pt.P, 1)])));
-      h.push(`<p><small>В худшей зоне: P<sub>z</sub>${q("pz")} ${f(P.sh12.Pz, 1)} дБм, TCP<sub>z</sub>${q("tcp")} ${f(P.sh12.TCPz)} Мбит/с — для уровня «${esc(P.sh12.kpi)}». Замер «после» сравнивается с этими значениями.</small></p>`);
-    }
+    h.push(`<h3 id="nc-pvh-${uid}" class="nc-pvh">План квартиры и покрытие (Ш4, Ш6)</h3>`);
+    h.push(`<div class="nc-pv" id="nc-pv-${uid}">${s0 && typeof R.planFor === "function" ? pvSwitch(R, uid, s0) : ""}<div class="nc-pv-out">${planView(R, s0)}</div></div>`);
     h.push(`<details><summary>Дерево архитектур (Ш5) и устойчивость решения</summary>`);
     h.push(table([`Архитектура${q("arch")}`, `Итог${q("tree")}`, `K${q("kz")}, %`, `P<sub>z</sub>${q("pz")}, дБм`, `TCP<sub>z</sub>${q("tcp")}, Мбит/с`, `C${q("c")}, Мбит/с`, `Кабель${q("cable")}, м`, `Не выполнено${q("kpi")}`], R.tree.map((t) => t.skip
       ? [esc(t.arch) + " — " + esc(NE.ARCH_NAME[t.arch]), "не рассматривается", "—", "—", "—", "—", "—", "—"]
@@ -250,7 +262,7 @@
     h.push(`<p><small>${esc(s3.note)}${q("c")}. B<sub>треб</sub>${q("breq")} = (Σ + 6) × 1,25 = ${f(s3.B, 2)} Мбит/с.</small></p></details>`);
     h.push(`<details><summary>Все подходящие варианты (${R.rank.length}) — ранжирование по баллу S</summary>`);
     h.push(table(["№", "Модель", `Источник${q("src")}`, `Узлов${q("node")}`, `Архитектура${q("arch")}`, `TCP<sub>z</sub>${q("tcp")}`, `P<sub>z</sub>${q("pz")}`, `TCO 5 лет${q("tco")}`, `S${q("s")}`, `k1…k5${q("kk")}`], R.rank.map((x, i) =>
-      [i + 1, esc(x.name), esc(x.src), x.n, esc(x.arch), f(x.TCPz), f(x.Pz, 1), rub(x.tco), f(x.S, 3), x.k.map((v) => f(v, 2)).join(" / ")]), "", 'data-st-fix="2" data-st-sort="0,1,2,3,4,5,6,7,8" data-st-sorted="8:desc"'));
+      [i + 1, esc(x.name) + (typeof R.planFor === "function" ? ` <button type="button" class="nc-pv-pick" data-uid="${uid}" data-pv="${esc(x.id)}" title="Показать на плане как «Свой выбор»">на план</button>` : ""), esc(x.src), x.n, esc(x.arch), f(x.TCPz), f(x.Pz, 1), rub(x.tco), f(x.S, 3), x.k.map((v) => f(v, 2)).join(" / ")]), "", 'data-st-fix="2" data-st-sort="0,1,2,3,4,5,6,7,8" data-st-sorted="8:desc"'));
     h.push(`<p><small>k1 — скорость, k2 — покрытие, k3 — проводная часть, k4 — функции, k5 — стоимость (И4, формула 10); веса AHP${q("ahp")} уровня «${esc(kpi.name)}». Сортировка — кнопки ↕ в заголовках столбцов.</small></p></details>`);
     h.push(`<details><summary>Исключённые модели (${R.excluded.length})</summary><ul>${R.excluded.map((x) => `<li>${esc(x.name)} <small>(${esc(x.src)})</small> — ${x.why.map(esc).join("; ")}</li>`).join("")}</ul></details>`);
     h.push(`<p class="nc-foot"><small>Каталог: ${R.counts.total} моделей${meta.kt !== undefined ? ` (парк К Телеком — ${meta.kt})` : ""}, данные на ${dmy(meta.updated)}; подошло ${R.counts.passed}, из парка ${R.counts.passed_kt}. ` +
@@ -262,13 +274,13 @@
     return "—";
   }
 
-  root.NetCalcUI = { defaults, toParams, userParams, render, planSvg, rssiColor };
+  root.NetCalcUI = { defaults, toParams, userParams, render, planSvg, rssiColor, pick, pvDefault, pvButtons, pvLabel, planView, ownX, pvSwitch };
   if (typeof document === "undefined") return;
 
   // ---------------------------------------------------------------- страница
   const SRC = document.currentScript && document.currentScript.src;   // адрес calc.js — от него ищем ../data/*.json
   const getJson = (name) => fetch(new URL("../data/" + name, SRC || location.href)).then((r) => { if (!r.ok) throw new Error(name + ": " + r.status); return r.json(); });
-  let eng = null, meta = {}, users = [], lastR = null;
+  let eng = null, meta = {}, users = [], lastR = null, ownPending = false;
   const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
   const row = (code, label, ctl, hint = "") => `<label class="nc-row"><span><b class="nc-code">${code}</b> ${label}${hint ? ` <small>${hint}</small>` : ""}</span>${ctl}</label>`;
   function form(plans) {
@@ -343,15 +355,48 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
     el.querySelector("#nc-ulist").innerHTML = users.map((u, i) => `<li>${esc(u.name)} — ${esc(u.type)}, Wi-Fi ${esc(u.std)}, ${u.bands.map(esc).join(" / ")} ГГц, WAN ${esc(u.wan)}` +
       `${u.owned ? ", уже есть" : ""} <button type="button" class="nc-del" data-i="${i}" title="Убрать">✕</button></li>`).join("");
   }
-  function run(el) {
+  // o.pick — сразу показать на плане вариант с этим id («Свой выбор»); o.scroll: "res" (по умолчанию), "pv" — к плану, "" — не прокручивать
+  function run(el, o = {}) {
     const fe = el.querySelector("#nc-form"), out = el.querySelector("#nc-out"), er = el.querySelector("#nc-err"), dl = el.querySelector("#nc-json");
     const { p, err } = toParams(readForm(fe));
     er.innerHTML = err.map(esc).join("<br>");
-    if (err.length) { out.innerHTML = ""; dl.hidden = true; return; }
-    try { lastR = eng.calc(p); } catch (e) { er.textContent = "Ошибка расчёта: " + e.message; out.innerHTML = ""; dl.hidden = true; return; }
+    if (err.length) { out.innerHTML = ""; dl.hidden = true; lastR = null; return null; }
+    try { lastR = eng.calc(p); } catch (e) { er.textContent = "Ошибка расчёта: " + e.message; out.innerHTML = ""; dl.hidden = true; lastR = null; return null; }
     out.innerHTML = render(lastR, meta);
     dl.hidden = false;
-    out.querySelector("#nc-res").scrollIntoView({ behavior: "smooth", block: "start" });
+    const box = out.querySelector(".nc-pv"), uid = box ? box.id.slice(6) : null;
+    const s = o.pick && uid ? pick(lastR, o.pick, "own") : null;
+    if (s) pvShow(uid, s);
+    const sc = o.scroll === undefined ? "res" : o.scroll, to = sc === "pv" && uid ? out.querySelector("#nc-pvh-" + uid) : sc ? out.querySelector("#nc-res") : null;
+    if (to) to.scrollIntoView({ behavior: "smooth", block: "start" });
+    return { s };
+  }
+  // переключатель вариантов на плане: перерисовать план и Ш6–Ш8, Ш12; обновить кнопки, списки «Свой выбор» и строку таблицы
+  function pvShow(uid, s, o = {}) {
+    const box = document.getElementById("nc-pv-" + uid);
+    if (!box || !s || !lastR) return;
+    box.querySelector(".nc-pv-out").innerHTML = planView(lastR, s);
+    box.querySelectorAll(".nc-pv-b").forEach((b) => {
+      const own = b.dataset.m === "own";
+      b.setAttribute("aria-pressed", String(own ? s.m === "own" : b.dataset.pv === s.key));
+      if (own && s.m === "own") { b.dataset.pv = s.key; b.querySelector("small").textContent = `${s.x.name} × ${s.x.n}`; }
+    });
+    if (s.m === "own") {
+      document.querySelectorAll(`.nc-pv-sel[data-uid="${uid}"]`).forEach((x) => { x.value = s.key; });
+      const tr = document.getElementById("nc-own-" + uid);
+      if (tr) { const c = ownX(lastR, s, uid); tr.querySelector(".nc-own-x").innerHTML = c[0]; for (let i = 1; i < c.length; i++) if (tr.cells[i + 1]) tr.cells[i + 1].innerHTML = c[i]; }
+    }
+    if (o.scroll) { const hd = document.getElementById("nc-pvh-" + uid); if (hd) hd.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  }
+  const closeFull = () => (root.NetTables && root.NetTables.isOpen() ? root.NetTables.close() : Promise.resolve());
+  function ownForm() {   // «Своё оборудование…» из списка «Свой выбор»: раскрыть G3; после «Добавить в расчёт» — пересчёт и показ на плане
+    const d = document.getElementById("nc-own"); if (!d) return;
+    ownPending = true;
+    closeFull().then(() => {
+      d.open = true;
+      d.scrollIntoView({ behavior: "smooth", block: "start" });
+      const n = d.querySelector('[name="u_name"]'); if (n) n.focus({ preventScroll: true });
+    });
   }
   async function init() {
     const el = document.getElementById("netcalc"); if (!el) return;
@@ -370,10 +415,18 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
       const msg = el.querySelector("#nc-umsg"), u = readUser(fe);
       try { eng.userItem(userParams(u), users.length); } catch (e) { msg.textContent = e.message; return; }
       if (users.length >= 5) { msg.textContent = "не больше 5 моделей"; return; }
-      users.push(u); msg.textContent = ""; fe.elements.u_name.value = ""; showUsers(el);
+      users.push(u); fe.elements.u_name.value = ""; showUsers(el);
+      const pend = ownPending, say = (t, ok) => { msg.textContent = t; msg.className = ok ? "nc-ok" : "nc-err"; };
+      ownPending = false;
+      if (!lastR) { say("добавлено — учтётся при расчёте", true); return; }
+      const r = run(el, { pick: "U" + users.length, scroll: pend ? "pv" : "" });   // id своего оборудования в движке — U1…U5 по порядку списка
+      if (!r) say("исправьте ошибки в форме и нажмите «Рассчитать»", false);
+      else if (r.s) say("добавлено и показано на плане — «Свой выбор»", true);
+      else say("добавлено, но не подходит по KPI — см. «Своё оборудование не подошло» в результате", false);
     });
     el.querySelector("#nc-ulist").addEventListener("click", (ev) => {
       const b = ev.target.closest(".nc-del"); if (!b) return; users.splice(+b.dataset.i, 1); showUsers(el);
+      if (lastR) run(el, { scroll: "" });
     });
     el.querySelector("#nc-json").addEventListener("click", (ev) => {
       ev.preventDefault(); if (!lastR) return;
@@ -383,8 +436,34 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
       const a = document.createElement("a"); a.href = url; a.download = `raschet_${R.sh2.code}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
-  // «Аналоги ▾» — и на странице, и в окне «На весь экран» (таблица переносится туда); ссылка на G3 раскрывает блок
+  // «Аналоги ▾», переключатель вариантов и «на план» — и на странице, и в окне «На весь экран» (таблица переносится туда); ссылка на G3 раскрывает блок
+  document.addEventListener("change", (ev) => {
+    const sel = ev.target.closest && ev.target.closest(".nc-pv-sel");
+    if (!sel || !lastR) return;
+    const uid = sel.dataset.uid, v = sel.value;
+    if (v === "+own") {
+      const ob = document.querySelector(`#nc-pv-${uid} .nc-pv-b[data-m="own"]`);
+      sel.value = ob && ob.dataset.pv ? ob.dataset.pv : "";
+      ownForm();
+      return;
+    }
+    if (v) pvShow(uid, pick(lastR, v, "own"));
+  });
   document.addEventListener("click", (ev) => {
+    const t = ev.target.closest ? ev.target : null;
+    const pb = t && t.closest(".nc-pv-b");
+    if (pb && lastR) {
+      const uid = pb.dataset.uid;
+      if (pb.dataset.m !== "own") { pvShow(uid, pick(lastR, pb.dataset.pv, pb.dataset.m)); return; }
+      const box = document.getElementById("nc-pv-" + uid), sel = box && box.querySelector(".nc-pv-sel"), k = pb.dataset.pv || (sel && sel.value);
+      if (k && k !== "+own") { pvShow(uid, pick(lastR, k, "own")); return; }
+      if (sel) { sel.focus(); try { sel.showPicker(); } catch (e) { /* список откроется по клавише или касанию */ } }
+      return;
+    }
+    const pk = t && t.closest(".nc-pv-pick");
+    if (pk && lastR) { const s = pick(lastR, pk.dataset.pv, "own"); if (s) closeFull().then(() => pvShow(pk.dataset.uid, s, { scroll: true })); return; }
+    const go = t && t.closest(".nc-pv-go");
+    if (go) { ev.preventDefault(); const uid = go.getAttribute("href").slice(8); closeFull().then(() => { const hd = document.getElementById("nc-pvh-" + uid); if (hd) hd.scrollIntoView({ behavior: "smooth", block: "start" }); }); return; }
     const b = ev.target.closest && ev.target.closest(".nc-an-b");
     if (b) {
       const r = document.getElementById(b.getAttribute("aria-controls")); if (!r) return;
