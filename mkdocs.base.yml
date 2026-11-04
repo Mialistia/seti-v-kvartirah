@@ -27,6 +27,9 @@ markdown_extensions:
   - pymdownx.arithmatex: {generic: true}
   - pymdownx.superfences
   - pymdownx.tasklist: {custom_checkbox: true}
+extra_css:
+  - assets/css/site.css
 extra_javascript:
   - assets/js/mathjax-config.js
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - assets/js/tables.js
