@@ -6,7 +6,8 @@
 // Совпадение с эталоном на Python — 31 контрольный пример (tests/fixtures/cases_i4_base.json, cases_i4_spec.json; tests/engine.test.mjs).
 (function (root) {
   "use strict";
-  const VERSION = "engine_i4 1.0 (04.11.2026)";
+  const VERSION = "engine_i4 1.1 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора), расчёт не изменился
+  const REF_VERSION = "engine_i4 1.0 (04.11.2026)";   // версия эталона на Python (tests/fixtures): 31 пример И4
   // ---------------------------------------------------------------- константы (источники — отчёт И4, табл. 2)
   const BANDS = { "2,4": 2437.0, "5": 5500.0, "6": 6200.0 };      // центральные частоты расчёта, МГц
   const BI = { "2,4": 0, "5": 1, "6": 2 };                         // индекс диапазона в таблице потерь стен
@@ -30,8 +31,11 @@
   const TARIFF = 7.15, R_ = 0.14, T_ = 5;
   let ANN = 0;
   for (let t = 1; t <= T_; t++) ANN += 1 / (1 + R_) ** t;      // 3,4331
+  // трафик устройств: [название, скорость b, Мбит/с; коэффициент одновременности k_одн] — И1, табл. 10–11; И4, табл. 5, формула (5)
+  // ПК — класс «Игровые (ПК, консоли)» И1, табл. 10: 10–50 Мбит/с, k 0,30–0,50; принято как для консоли в табл. 11 — 50 × 0,4.
+  // «Планшет» в форме калькулятора заменён на «ПК» и остаётся только для контрольных примеров И4 (DEFAULTS.dev, tests/fixtures).
   const DEV = { tv: ["Smart TV 4K", 100.0, 0.60], console: ["Игровая консоль", 50.0, 0.40], laptop: ["Ноутбук", 150.0, 0.275],
-    phone: ["Смартфон", 100.0, 0.275], tablet: ["Планшет", 60.0, 0.275], iot: ["IoT", 0.1, 0.075] };   // И1, формула (4.13)
+    phone: ["Смартфон", 100.0, 0.275], pc: ["ПК", 50.0, 0.40], tablet: ["Планшет", 60.0, 0.275], iot: ["IoT", 0.1, 0.075] };
   const B_CONST = 6.0, K_ZAP = 0.25;
   const Q_SEG = [4899.0, 9029.5, 15144.5];                        // квартили цен рынка И3, руб.
   const SEG_CAP = { 1: Q_SEG[1], 2: Q_SEG[2], 3: null };          // бюджет — I–II, оптимальный — I–III, премиум — I–IV
@@ -48,6 +52,7 @@
     "В-кабель": "два узла, кабельный backhaul", "В-PL": "два узла, backhaul Powerline (после теста)",
     "Г-радио": "три узла, беспроводной backhaul", "Г-кабель": "три узла, кабельный backhaul" };
   const ROOT_TYPES = ["Роутер", "Интернет-центр", "Mesh-система"];
+  // DEFAULTS.dev — семья из 3 человек отчёта И1 (табл. 11), как в примере К3-2 отчёта И4 (B_треб = 334,45 Мбит/с)
   const DEFAULTS = { cls: null, rooms: null, area: null, constr: null, L_W1: null, entry_at: "прихожая", cable_ok: true, tariff: 500,
     dev: { tv: 1, console: 1, laptop: 2, phone: 3, tablet: 1, iot: 8 }, iptv: false, vpn: false, level: 2, need6: false,
     budget: null, user: [], pl_mbps: null, catalog: true, d_eirp: 0.0, air160: true, robust: true };
@@ -643,7 +648,7 @@
     }
     return { calc, K1MAX, catalog: CAT, plans: PLD, medianPrice, userItem, classify, breq, Ldop };
   }
-  root.NetEngine = { VERSION, create, pyRound, fmt, pct10, arange, rateTable, rphy1, fspl, LEVELS, DEV, ARCH_NAME, ORDER, CLASS_DEF, STD_CLASS,
+  root.NetEngine = { VERSION, REF_VERSION, create, pyRound, fmt, pct10, arange, rateTable, rphy1, fspl, LEVELS, DEV, ARCH_NAME, ORDER, CLASS_DEF, STD_CLASS,
     CLASS_AREA, PLAN_OF, EIRP_DEF, EIRP_MAX, DEFAULTS, AHP, ANN, N20 };
   if (typeof module !== "undefined" && module.exports) module.exports = root.NetEngine;
 })(typeof globalThis !== "undefined" ? globalThis : this);

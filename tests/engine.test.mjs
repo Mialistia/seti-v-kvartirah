@@ -10,7 +10,8 @@ const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf
 const eng = NE.create({ plans: read("../docs/assets/data/plans.json"), catalog: read("./fixtures/equipment_i4.json") });
 const cases = [...read("./fixtures/cases_i4_base.json").cases, ...read("./fixtures/cases_i4_spec.json").cases];
 assert.equal(cases.length, 31, "должно быть 31 контрольный пример");
-assert.equal(NE.VERSION, read("./fixtures/cases_i4_base.json").version, "версия движка и эталона");
+assert.equal(NE.REF_VERSION, read("./fixtures/cases_i4_base.json").version, "версия эталона");
+assert.match(NE.VERSION, /^engine_i4 1\.\d+ /, "версия движка");
 
 // Краткая сводка результата — те же поля, что в эталоне (cases_i4.py, функция brief)
 function brief(r) {
