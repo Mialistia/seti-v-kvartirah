@@ -18,7 +18,9 @@ jobs:
         with: {node-version: 22}
       - name: Проверка калькулятора
         run: |
+          node --check docs/assets/js/engine.js
           node --check docs/assets/js/calc.js
+          node tests/engine.test.mjs
           node tests/calc.test.mjs
           node tests/equipment.test.mjs
       - name: Выгрузка из Notion (как при публикации)
