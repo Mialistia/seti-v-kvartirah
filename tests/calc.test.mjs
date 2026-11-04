@@ -43,6 +43,26 @@ let r = eng.calc(p);
 assert.equal(r.sh2.code, "К3-Р-П");
 assert.equal(r.sh3.B, 338.82);
 assert.deepEqual([r.rec.opt.name, r.rec.opt.n, r.rec.opt.arch], ["Mercusys MR1500X", 2, "В-радио"]);
+// Варианты К Телеком (R.kt): Эконом и Оптимальный совпали — одна строка, Премиум — SNR AX2 (TCP_z и P_z равны, k1 выше, S выше, чем у Netcraze Giga)
+assert.deepEqual(r.kt.rows.map((v) => [v.roles.join("+"), v.card.name, v.card.src]), [["eco+opt", "Mercusys MR1500X", "К Телеком"], ["prem", "SNR AX2", "К Телеком"]]);
+assert.equal(r.kt.best.name, r.rec.opt.name, "рекомендуемый вариант — оптимальный");
+assert.ok(!r.kt.fb && !r.kt.plan);
+for (const v of r.kt.rows) for (const l of Object.values(v.ex)) assert.ok(l.length >= 2 && l.every((e) => e.src === "Рынок" && e.i >= 1), "примеры аналогов — с рынка, из ранжирования");
+let html = UI.render(r, { updated: "2026-11-03", kt: 21 });
+assert.equal((html.match(/class="nc-an-b"/g) || []).length, 2, "кнопка «Аналоги» в каждой строке К Телеком");
+assert.ok(html.includes("★ Рекомендуем") && html.includes("он же самый экономичный"));
+assert.ok(!/Лучший с рынка|Оптимум/.test(html), "старые названия вариантов не выводятся");
+assert.match(html, /data-st-fix="2" data-st-sort="[\d,]+" data-st-sorted="8:desc"/, "ранжирование: закреплены № и Модель, сортировка");
+// Премиальный уровень: в парке нет Wi-Fi 7 — ближайший вариант К Телеком условно, план — для него
+r = eng.calc({ ...p, level: 3 });
+assert.equal(r.counts.passed_kt, 0);
+assert.ok(r.kt.fb && r.kt.rows.length === 1 && r.kt.rows[0].roles[0] === "fb");
+assert.equal(r.kt.best.name, r.rec.kt_fallback.name);
+assert.equal(r.kt.best.S, null);
+assert.equal(r.kt.plan.sh6.aps.length, r.kt.best.n);
+html = UI.render(r, { updated: "2026-11-03", kt: 21 });
+assert.ok(html.includes("условно") && html.includes("проконсультируйтесь со специалистом К Телеком"));
+assert.equal((UI.planSvg({ ...r, ...r.kt.plan }, r.kt.best).match(/<circle /g) || []).length, r.kt.best.n, "на плане — узлы ближайшего варианта К Телеком");
 // ошибки ввода
 const bad = { ...UI.defaults(), area: "5", tariff: "", dev: { tv: "-1" } };
 err = UI.toParams(bad).err;
@@ -53,7 +73,7 @@ assert.deepEqual(u, { name: "Мой роутер", type: "Роутер", std: "6
 assert.equal(eng.userItem(u).est_fields.join(","), "cls,nss,ch,pw");
 assert.throws(() => eng.userItem(UI.userParams({ name: "", type: "Роутер", std: "6", bands: [], wan: "1000", lan: "4" })), /name, bands/);
 
-// 8. Вывод результата на всех 31 примере: без ошибок, без «undefined» и «NaN», на плане — узлы оптимума
+// 8. Вывод результата на всех 31 примере: без ошибок, без «undefined» и «NaN», на плане — узлы рекомендованного варианта
 const cases = [...read("./fixtures/cases_i4_base.json").cases, ...read("./fixtures/cases_i4_spec.json").cases];
 for (const c of cases) {
   r = eng.calc(structuredClone(c.input));
@@ -65,6 +85,11 @@ for (const c of cases) {
     assert.ok(html.includes(r.rec.opt.name.replace(/&/g, "&amp;")), c.id);
     assert.equal((UI.planSvg(r, r.rec.opt).match(/<circle /g) || []).length, r.rec.opt.n, `${c.id}: узлов на плане`);
   }
+  // таблица вариантов: только К Телеком (порядок Эконом → Оптимальный → Премиум) и своё оборудование
+  const order = r.kt.rows.flatMap((v) => v.roles);
+  assert.ok(r.kt.rows.every((v) => v.card.src === "К Телеком"), `${c.id}: в таблице вариантов только К Телеком`);
+  assert.deepEqual(order, r.kt.fb ? ["fb"] : r.kt.rows.length ? order.slice().sort((x, y) => ["eco", "opt", "prem"].indexOf(x) - ["eco", "opt", "prem"].indexOf(y)) : [], `${c.id}: порядок вариантов`);
+  if (r.counts.passed_kt) assert.deepEqual([r.kt.best.id, r.kt.best.n, r.kt.best.arch], [r.rec.opt.id, r.rec.opt.n, r.rec.opt.arch], `${c.id}: оптимальный = rec.opt`);
 }
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
 const ids = Object.keys(GL.TERMS), grouped = GL.GROUPS.flatMap(([, g]) => g);
