@@ -6,7 +6,7 @@
 // Совпадение с эталоном на Python — 31 контрольный пример (tests/fixtures/cases_i4_base.json, cases_i4_spec.json; tests/engine.test.mjs).
 (function (root) {
   "use strict";
-  const VERSION = "engine_i4 1.4 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt); 1.3: R.planFor — план и Ш6–Ш8, Ш12 для любого варианта, R.geom.wt — потери стен плана; 1.4: своя планировка q.plan (layout.js), код со «*»; расчёт И4 не изменился
+  const VERSION = "engine_i4 1.5 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt); 1.3: R.planFor — план и Ш6–Ш8, Ш12 для любого варианта, R.geom.wt — потери стен плана; 1.4: своя планировка q.plan (layout.js), код со «*»; 1.5: preview / why — предпросмотр сигнала в конструкторе квартиры (layout-net.js); расчёт И4 не изменился
   const REF_VERSION = "engine_i4 1.0 (04.11.2026)";   // версия эталона на Python (tests/fixtures): 31 пример И4
   // ---------------------------------------------------------------- константы (источники — отчёт И4, табл. 2)
   const BANDS = { "2,4": 2437.0, "5": 5500.0, "6": 6200.0 };      // центральные частоты расчёта, МГц
@@ -481,6 +481,32 @@
       for (let j = 0; j < g.X.length; j++) pts.push([pyRound(g.X[j], 3), pyRound(g.Y[j], 3), pyRound(Math.max(...Ps.map((p) => p[j])), 1)]);
       return { step: STEP, pts };
     }
+    // ---------------------------------------------------------------- предпросмотр в конструкторе квартиры (layout-net.js); в расчёт И4 не входит
+    function preview(q, aps, E) {   // q: plan (layout.js), cls, constr, L_W1; aps — места узлов; карта RSSI 5 ГГц (медиана), как coverage
+      const g = geometry(q.cls || q.plan.cls, null, q.constr, q.L_W1, q.plan), e = isNone(E) ? EIRP_DEF["5"] : +E;
+      if (!aps.length) throw new Error("нет узлов");
+      const Ps = aps.map((a) => rssi(g, a, "5", e)), n = g.X.length, P = new Float64Array(n), pts = [], rooms = [];
+      let c = 0, cl = 0;
+      for (let j = 0; j < n; j++) {
+        let v = Ps[0][j];
+        for (let i = 1; i < Ps.length; i++) if (Ps[i][j] > v) v = Ps[i][j];
+        P[j] = v; pts.push([pyRound(g.X[j], 3), pyRound(g.Y[j], 3), pyRound(v, 1)]);
+        if (v >= P_THR) { c++; if (g.liv[j]) cl++; }
+      }
+      for (const nm of g.lrooms) { let w = g.roomIdx[nm][0]; for (const j of g.roomIdx[nm]) if (P[j] < P[w]) w = j; rooms.push({ room: nm, P: pyRound(P[w], 1), x: g.X[w], y: g.Y[w] }); }
+      return { g, E: e, thr: P_THR, step: STEP, pts, K: n ? c / n * 100 : 0, Kliv: g.livIdx.length ? cl / g.livIdx.length * 100 : 0, rooms };
+    }
+    function why(g, ap, pt, E) {   // разбор уровня в точке pt от узла ap: расстояние, потери на расстоянии (4.2), стены на пути — как в wallLoss
+      const e = isNone(E) ? EIRP_DEF["5"] : +E, d = Math.hypot(pt[0] - ap[0], pt[1] - ap[1]), fs = fspl(d, BANDS["5"]), walls = [];
+      for (const [x1, y1, x2, y2, t] of g.walls) {
+        if (t === "O") continue;
+        const s3 = Math.sign((x2 - x1) * (ap[1] - y1) - (y2 - y1) * (ap[0] - x1));
+        const s1 = Math.sign((pt[0] - ap[0]) * (y1 - ap[1]) - (pt[1] - ap[1]) * (x1 - ap[0])), s2 = Math.sign((pt[0] - ap[0]) * (y2 - ap[1]) - (pt[1] - ap[1]) * (x2 - ap[0]));
+        if (s1 !== s2 && s3 !== Math.sign((x2 - x1) * (pt[1] - y1) - (y2 - y1) * (pt[0] - x1))) walls.push({ t, L: g.WT[t][BI["5"]], w: [x1, y1, x2, y2] });
+      }
+      const L = walls.reduce((s, w) => s + w.L, 0);
+      return { ap, pt, d, E: e, fspl: fs, walls, L, P: e - fs - L, thr: P_THR };
+    }
     // ---------------------------------------------------------------- главный расчёт
     function calc(params) {
       const q = { ...JSON.parse(JSON.stringify(DEFAULTS)), ...(params || {}) };
@@ -704,7 +730,7 @@
       R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title, constr: g.constr, own: g.own, wt };
       return R;
     }
-    return { calc, K1MAX, catalog: CAT, plans: PLD, medianPrice, userItem, classify, breq, Ldop };
+    return { calc, K1MAX, catalog: CAT, plans: PLD, medianPrice, userItem, classify, breq, Ldop, preview, why };
   }
   root.NetEngine = { VERSION, REF_VERSION, create, pyRound, fmt, pct10, arange, rateTable, rphy1, fspl, LEVELS, DEV, ARCH_NAME, ORDER, CLASS_DEF, STD_CLASS,
     CLASS_AREA, PLAN_OF, EIRP_DEF, EIRP_MAX, DEFAULTS, AHP, ANN, N20 };
