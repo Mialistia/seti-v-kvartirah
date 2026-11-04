@@ -1,12 +1,12 @@
 // Выгрузка страниц из базы Notion «Страницы сайта» в docs/*.md и сборка меню mkdocs.yml,
-// а также базы «Оборудование К Телеком» в docs/assets/data/equipment.json (для калькулятора).
+// а также базы «Оборудование К Телеком» в docs/assets/data/equipment.json (каталог калькулятора, формат движка И4).
 // Переменные окружения: NOTION_TOKEN (токен интеграции), NOTION_DB (ID базы страниц),
 // NOTION_EQUIPMENT_DB (ID базы оборудования; необязательно, по умолчанию — база проекта).
 import { Client } from "@notionhq/client";
 import { NotionToMarkdown } from "notion-to-md";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fromNotionPage, toJson, EQUIPMENT_DB_DEFAULT, EQUIPMENT_FILE } from "./equipment.mjs";
+import { fromNotionPage, missing, toJson, EQUIPMENT_DB_DEFAULT, EQUIPMENT_FILE, MIN_ITEMS } from "./equipment.mjs";
 
 const { NOTION_TOKEN, NOTION_DB } = process.env;
 if (!NOTION_TOKEN || !NOTION_DB) { console.error("Нет NOTION_TOKEN или NOTION_DB"); process.exit(1); }
@@ -71,8 +71,14 @@ async function syncEquipment() {
       pages.push(...r.results);
       cursor = r.has_more ? r.next_cursor : undefined;
     } while (cursor);
-    const items = pages.map(fromNotionPage).filter(Boolean);
-    if (!items.length) throw new Error("в базе нет записей с моделью и ценой");
+    const items = [], skipped = [];
+    for (const pg of pages) {
+      const it = fromNotionPage(pg);
+      if (it) items.push(it);
+      else skipped.push(`${(pg.properties?.["Модель"]?.title ?? []).map((t) => t.plain_text).join("") || pg.id} (нет: ${missing(pg).join(", ")})`);
+    }
+    if (skipped.length) console.log(`Оборудование: без обязательных полей, на сайт не попали — ${skipped.length}: ${skipped.join("; ")}`);
+    if (items.length < MIN_ITEMS) throw new Error(`подходящих записей ${items.length}, нужно не меньше ${MIN_ITEMS}`);
     await fs.mkdir(path.dirname(EQUIPMENT_FILE), { recursive: true });
     await fs.writeFile(EQUIPMENT_FILE, toJson(items, "notion"));
     console.log(`OK оборудование — моделей: ${items.length}`);
