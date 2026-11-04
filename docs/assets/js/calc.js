@@ -1,267 +1,340 @@
-// Калькулятор подбора (черновик методики, развивается в И4).
-// Формулы: (4.2) FSPL, (4.5) многостеновая модель на худшем пути, (4.9) запас, (4.13) требуемая скорость.
-// Все коэффициенты — ориентиры из промта проекта; калибруются по замерам (И5).
-// Подбор оборудования — по парку К Телеком (docs/assets/data/equipment.json, выгружается из Notion).
+// Калькулятор подбора — интерфейс страницы docs/calculator.md.
+// Форма повторяет поля чек-листа обследования (коды A1–G3), расчёт — движок И4 (engine.js, шаги Ш2–Ш12).
+// Данные: ../data/plans.json (типовые планы И2) и ../data/equipment.json (база Notion «Оборудование К Телеком»),
+// пути считаются от адреса calc.js. Функции без DOM (toParams, render, planSvg) проверяются в tests/calc.test.mjs.
 (function (root) {
-  // Потери в слое по ITU-R P.2040-4, дБ: [2,4 ГГц, 5,5 ГГц]; «капитальная» — для правила «≤ 1 капитальной стены между узлами»
-  const MATERIALS = [
-    { id: "conc_flat", name: "Бетонная стена квартиры (ITU-R P.1238)", l: [10, 13], cap: true },
-    { id: "conc10", name: "Бетон 10 см", l: [8.1, 14.0], cap: true },
-    { id: "conc16", name: "Бетон 16 см", l: [11.8, 21.5], cap: true },
-    { id: "conc20", name: "Бетон 20 см", l: [14.6, 26.5], cap: true },
-    { id: "brick12", name: "Кирпич 12 см", l: [3.5, 4.2], cap: false },
-    { id: "brick25", name: "Кирпич 25 см", l: [6.4, 7.3], cap: true },
-    { id: "brick38", name: "Кирпич 38 см", l: [9.5, 10.9], cap: true },
-    { id: "gkl", name: "Гипсокартон 25 мм", l: [1.2, 2.0], cap: false },
-    { id: "door", name: "Деревянная дверь 4 см", l: [0.6, 1.5], cap: false },
-    { id: "glass", name: "Стекло 4 мм", l: [1.1, 3.0], cap: false },
-    { id: "irr", name: "Энергосберегающее стекло (low-E)", l: [23.7, 24.6], cap: true },
-  ];
-  // Скорость на один поток, Мбит/с — ориентиры [ПРОВЕРИТЬ по источникам в И3–И4]
-  const DEVICES = [
-    { id: "tv4k", name: "ТВ / приставка 4K", b: 25 },
-    { id: "game", name: "Облачные игры / консоль", b: 35 },
-    { id: "call", name: "Видеосвязь, удалённая работа", b: 4 },
-    { id: "laptop", name: "Ноутбук / ПК (веб, загрузки)", b: 10 },
-    { id: "phone", name: "Смартфон", b: 5 },
-    { id: "cam", name: "IP-камера", b: 4 },
-    { id: "iot", name: "Умный дом (IoT)", b: 0.1 },
-  ];
-  const SEG = {
-    budget: { name: "Бюджетный", rssi: -72, cover: 80, tcp: 100 },
-    optimum: { name: "Оптимальный", rssi: -67, cover: 90, tcp: 300 },
-    premium: { name: "Премиальный", rssi: -65, cover: 95, tcp: 600 },
-  };
-  const fspl = (d, fMHz) => 20 * Math.log10(Math.max(d, 1)) + 20 * Math.log10(fMHz) - 27.55; // (4.2)
+  "use strict";
+  const NE = root.NetEngine;
+  if (!NE) throw new Error("calc.js: сначала подключите engine.js");
+  const DEV_KEYS = ["tv", "console", "laptop", "phone", "tablet", "iot"];
+  const BANDS = ["2,4", "5", "6"];
+  const ROLE = { opt: "Оптимум", eco: "Эконом", res: "Запас", best_market: "Лучший с рынка" };
+  const ROLE_HINT = { opt: "лучший по баллу S (AHP) вариант из парка К Телеком, а если парк не проходит — лучший из всех",
+    eco: "наименьшая стоимость владения TCO за 5 лет среди остальных", res: "наибольшая скорость TCP в худшей зоне среди остальных",
+    best_market: "лучший по баллу S вариант с рынка (И3)" };
+  const USER_TYPES = ["Роутер", "Mesh-система", "Интернет-центр", "Mesh-ретранслятор", "Точка доступа"];
+  const MESH = ["EasyMesh", "Deco", "Halo", "AiMesh", "Netcraze Mesh", "SNR Mesh", "Huawei Mesh", "Xiaomi Mesh", "Tenda Mesh", "Netis Mesh", "CAPsMAN"];
 
-  function compute(x) {
-    const cls = x.area > 90 || x.rooms >= 4 ? 5 : x.rooms <= 0 ? 1 : x.rooms + 1; // студия=0 комнат
-    const code = `К${cls}-${x.layout}-${x.build}`;
-    let L24 = 0, L55 = 0, capWalls = 0;
-    for (const m of MATERIALS) {
-      const n = x.walls[m.id] || 0;
-      L24 += n * m.l[0]; L55 += n * m.l[1]; if (m.cap) capWalls += n;
-    }
-    const isl = L55; // индекс сложности: потери в стенах на худшем пути, 5 ГГц
-    const grade = isl <= 10 ? "низкая" : isl <= 20 ? "средняя" : "высокая";
-    const seg = SEG[x.segment];
-    const P55 = x.eirp - fspl(x.dist, 5500) - L55; // (4.5) для худшей точки
-    const P24 = x.eirp - fspl(x.dist, 2437) - L24;
-    const need = seg.rssi + x.z * x.sigma; // требуемый уровень с запасом (4.9)
-    const M = P55 - seg.rssi;
-    const oneOk = P55 >= need;
-    let arch, nodes;
-    if (oneOk) { arch = "Один роутер Wi-Fi 6/7 в центре квартиры"; nodes = 1; }
-    else {
-      const minByClass = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }[cls];
-      nodes = Math.max(2, minByClass, capWalls); // между узлами — не более одной капитальной стены
-      if (x.cable) arch = "Mesh или точки доступа с проводным backhaul (витая пара); для потолочных ТД — PoE-коммутатор";
-      else if (x.plc === "yes") arch = "Узел с Powerline-backhaul (тест скорости пройден)";
-      else arch = "Трёхдиапазонный Mesh с беспроводным backhaul; не более 1 капитальной стены между узлами";
-    }
-    let sum = 0;
-    for (const d of DEVICES) sum += (x.dev[d.id] || 0) * d.b;
-    const breq = x.kOdn * sum * (1 + x.kZap); // (4.13)
-    return { cls, code, isl, grade, P55, P24, need, M, oneOk, arch, nodes, breq, seg,
-      plcNote: !oneOk && !x.cable && x.plc === "unknown" ? "Сначала проведите Powerline-тест между точками установки: если скорость ≥ требуемой, подойдёт Powerline-backhaul." : "" };
-  }
-  // ---------- подбор оборудования из парка К Телеком (черновик методики, И4) ----------
-  // Предварительные веса критериев; заменятся весами AHP из И3.
-  const WEIGHTS = { price: 0.35, speed: 0.20, wifi: 0.20, area: 0.15, clients: 0.10 };
-  const MAIN_TYPES = ["Роутер", "Интернет-центр", "Mesh-система"];
-  const MAX_NODES = 4;
-  const NOTE = {
-    halo: "«100 / 500 Мбит/с» по таблице К Телеком принято как 100 Мбит/с при радиосвязи модулей и 500 Мбит/с при кабеле между ними — трактовка уточняется в И3",
-    any: "Mesh «с любой моделью» — по таблице К Телеком; совместимость узлов проверяется в И3",
-    half: "узлы связаны по радио на тех же двух диапазонах — в дальней зоне принята половина скорости (оценка)",
-    buddy: "Buddy 5 не подключается к интернету сам, расширяет сеть роутера Netcraze; скорость в дальней зоне — до 100 Мбит/с",
-  };
-  const REASONS = {
-    sale: "снят с заказа (распродажа остатков)",
-    wifi4: "Wi-Fi 4 — только для бюджетного сегмента",
-    nomesh: "нет Mesh — узлы не объединяются в одну сеть",
-    tariff: "не тянет тариф",
-    far: "мала скорость в дальней зоне",
-    clients: "мало одновременных устройств",
-    vpn: "нет VPN",
-    budget: "дороже бюджета",
-  };
-
-  // Все возможные комплекты из парка под нужное число узлов и площадь.
-  function buildKits(eq, need) {
-    const kits = [];
-    const buddy = eq.find((m) => m.type === "Mesh-ретранслятор" && m.mesh === "netcraze");
-    const add = (parts, o) => {
-      const items = parts.map(([m, qty]) => ({ m, qty }));
-      const main = items[0].m;
-      kits.push({ items, main, price: items.reduce((s, i) => s + i.m.price * i.qty, 0),
-        wifi: Math.min(...items.map((i) => i.m.wifi || 4)), notes: [], ...o });
-    };
-    for (const m of eq) {
-      if (!MAIN_TYPES.includes(m.type) || !m.area) continue;
-      const per = m.area / (m.nodes || 1);
-      const k = Math.max(need.nodes, Math.ceil(need.area / per), 1);
-      if (m.nodes > 1) { // готовый Mesh-комплект
-        if (k < 2) continue; // хватает одного узла — комплект не предлагаем
-        const packs = Math.ceil(k / m.nodes);
-        if (packs > 2) continue;
-        const sp = m.mesh === "halo" ? (need.wired ? m.tariff : Math.min(100, m.tariff)) : need.wired ? m.tariff : m.tariff / 2;
-        add([[m, packs]], { nodes: packs * m.nodes, tariff: sp, far: sp, clients: m.clients * packs, area: m.area * packs,
-          mesh: true, notes: m.mesh === "halo" ? [NOTE.halo] : [] });
-        continue;
-      }
-      if (k === 1) { add([[m, 1]], { nodes: 1, tariff: m.tariff, far: m.tariff, clients: m.clients, area: m.area, mesh: true }); continue; }
-      if (k > MAX_NODES) continue;
-      // несколько одинаковых узлов одной экосистемы
-      const notes = [];
-      if (m.mesh === "any") notes.push(NOTE.any);
-      if (!need.wired) notes.push(NOTE.half);
-      add([[m, k]], { nodes: k, tariff: m.tariff, far: need.wired ? m.tariff : m.tariff / 2, clients: m.clients * k,
-        area: m.area * k, mesh: m.mesh !== "none" && m.mesh !== "halo", notes });
-      // роутер Netcraze + ретрансляторы Buddy 5
-      if (m.mesh === "netcraze" && buddy) {
-        const b = Math.max(need.nodes - 1, Math.ceil((need.area - m.area) / buddy.area), 1);
-        if (b + 1 > MAX_NODES) continue;
-        add([[m, 1], [buddy, b]], { nodes: b + 1, tariff: m.tariff, far: Math.min(m.tariff, buddy.tariff),
-          clients: m.clients + buddy.clients * b, area: m.area + buddy.area * b, mesh: true, notes: [NOTE.buddy] });
-      }
-    }
-    return kits;
-  }
-
-  // need: { nodes, area, segment, devices, breq, tariff, vpn, budget, wired }
-  function pickEquipment(eq, need) {
-    const seg = SEG[need.segment] || SEG.optimum;
-    const needFar = Math.min(need.tariff, seg.tcp);
-    const kits = buildKits(eq, need);
-    const excluded = {};
-    const ok = [], bad = [];
-    for (const k of kits) {
-      const v = [];
-      if (k.items.some((i) => !i.m.order)) v.push("sale");
-      if (k.wifi < 5 && need.segment !== "budget") v.push("wifi4");
-      if (k.nodes > 1 && !k.mesh) v.push("nomesh");
-      if (k.tariff < need.tariff) v.push("tariff");
-      if (k.far < needFar) v.push("far");
-      if (need.devices > k.clients) v.push("clients");
-      if (need.vpn && !k.main.vpn) v.push("vpn");
-      if (need.budget > 0 && k.price > need.budget) v.push("budget");
-      k.violations = v.map((c) => REASONS[c]);
-      for (const c of v) excluded[REASONS[c]] = (excluded[REASONS[c]] || 0) + 1;
-      (v.length ? bad : ok).push(k);
-    }
-    // Оценки критериев 0…1 (больше — лучше). Цена — относительно прошедших комплектов;
-    // запас скорости, площади и устройств сверх разумного (×2, ×1,5, ×2) не добавляет баллов.
-    const prices = ok.map((k) => k.price), lo = Math.min(...prices), hi = Math.max(...prices);
-    const margin = (r, cap) => Math.max(0, Math.min(r, cap) - 1) / (cap - 1);
-    for (const k of ok) {
-      k.parts = { price: hi > lo ? (hi - k.price) / (hi - lo) : 1, speed: margin(k.far / needFar, 2), wifi: ((k.wifi || 4) - 4) / 2,
-        area: margin(k.area / Math.max(need.area, 1), 1.5), clients: margin(k.clients / Math.max(need.devices, 1), 2) };
-      k.score = Object.keys(WEIGHTS).reduce((s, c) => s + WEIGHTS[c] * k.parts[c], 0);
-      k.reserve = (k.score - WEIGHTS.price * k.parts.price) / (1 - WEIGHTS.price);
-    }
-    const best = (cmp) => [...ok].sort(cmp)[0];
-    const variants = [];
-    const put = (label, k) => { if (!k) return; const v = variants.find((x) => x.kit === k); if (v) v.labels.push(label); else variants.push({ labels: [label], kit: k }); };
-    put("эконом", best((a, b) => a.price - b.price || b.score - a.score));
-    put("оптимум", best((a, b) => b.score - a.score || a.price - b.price));
-    put("запас", best((a, b) => b.reserve - a.reserve || a.price - b.price));
-    const nearest = ok.length ? [] : [...bad].sort((a, b) => a.violations.length - b.violations.length || a.price - b.price).slice(0, 3);
-    const outdoor = need.outdoor ? eq.find((m) => m.type === "Уличная точка доступа" && m.order) || null : null;
-    return { variants, passed: ok.length, total: kits.length, excluded, nearest, needFar, outdoor };
-  }
-
-  root.NetCalc = { MATERIALS, DEVICES, SEG, WEIGHTS, compute, fspl, buildKits, pickEquipment };
-  if (typeof module !== "undefined") module.exports = root.NetCalc;
-
-  // ---------- интерфейс ----------
-  if (typeof document === "undefined") return;
-  const f1 = (v) => v.toFixed(1).replace(".", ",");
-  const w = (v) => v.toFixed(2).replace(".", ",");
-  const rub = (v) => Math.round(v).toLocaleString("ru-RU") + " ₽";
+  // ---------------------------------------------------------------- формат
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const SRC = document.currentScript && document.currentScript.src; // адрес calc.js — от него ищем data/equipment.json
-  let eqLoad = null;
-  const loadEq = () => (eqLoad ||= fetch(new URL("../data/equipment.json", SRC || location.href))
-    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .catch((e) => { eqLoad = null; throw e; }));
-  function init() {
-    const box = document.getElementById("netcalc"); if (!box) return;
-    box.querySelector("#nc-walls").innerHTML = MATERIALS.map((m) =>
-      `<label class="nc-row"><span>${m.name} <small>(${f1(m.l[1])} дБ на 5 ГГц)</small></span><input type="number" min="0" max="10" value="0" data-wall="${m.id}"></label>`).join("");
-    box.querySelector("#nc-devs").innerHTML = DEVICES.map((d) =>
-      `<label class="nc-row"><span>${d.name} <small>(${f1(d.b)} Мбит/с)</small></span><input type="number" min="0" max="50" value="0" data-dev="${d.id}"></label>`).join("");
-    box.querySelector("#nc-area").addEventListener("input", (e) => {
-      const d = box.querySelector("#nc-dist"); if (!d.dataset.touched) d.value = Math.round(Math.sqrt(+e.target.value || 0) * 1.2);
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  const f = (v, nd = 0) => (isNum(v) ? (nd ? NE.fmt(v, nd).replace(".", ",") : Math.round(NE.pyRound(v)).toLocaleString("ru-RU")) : "—");
+  const rub = (v) => (isNum(v) ? f(v) + " ₽" : "—");
+  const dmy = (iso) => (iso ? String(iso).slice(0, 10).split("-").reverse().join(".") : "—");
+  const num = (v) => (v === "" || v === null || v === undefined || typeof v === "boolean" || !Number.isFinite(+v) ? null : +v);
+
+  // ---------------------------------------------------------------- поля формы → параметры движка
+  function defaults() {
+    return { rooms: "2", area: "", cls: "", constr: "", L_W1: "", tariff: "500", entry_at: "прихожая", iptv: false, cable_ok: true, pl_mbps: "",
+      air160: true, dev: { ...NE.DEFAULTS.dev }, need6: false, vpn: false, level: "2", budget: "", user: [] };
+  }
+  function userParams(u) {   // своё оборудование (G3): обязательные поля и то, что указано; остальное движок оценит по классу
+    const e = { name: String(u.name ?? "").trim(), type: u.type, std: u.std, bands: (u.bands || []).slice(), wan: num(u.wan), lan: num(u.lan) };
+    if (u.cls) e.cls = u.cls;
+    for (const k of ["nss", "ch", "u", "price", "pw"]) { const v = num(u[k]); if (v !== null && v > 0) e[k] = v; }
+    const eirp = {};
+    for (const b of BANDS) { const v = num(u.eirp?.[b]); if (v !== null) eirp[b] = v; }
+    if (Object.keys(eirp).length) e.eirp = eirp;
+    if (u.mesh) e.mesh = u.mesh;
+    for (const k of ["vpn", "iptv"]) if (num(u[k]) !== null) e[k] = num(u[k]);
+    if (u.owned) e.owned = true;
+    return e;
+  }
+  function toParams(fm) {   // возвращает { p — параметры calc, err — ошибки ввода }
+    const err = [], p = { level: [1, 2, 3].includes(+fm.level) ? +fm.level : 2, entry_at: fm.entry_at === "центр" ? "центр" : "прихожая",
+      cable_ok: !!fm.cable_ok, iptv: !!fm.iptv, vpn: !!fm.vpn, need6: !!fm.need6, air160: !!fm.air160, dev: {}, user: [] };
+    const rng = (key, label, lo, hi, need = false) => {
+      const raw = fm[key], v = num(raw);
+      if (v === null) { if (need || (raw !== "" && raw !== null && raw !== undefined)) err.push(`${label}: укажите число`); return null; }
+      if (v < lo || v > hi) { err.push(`${label}: допустимо ${lo}–${hi}`); return null; }
+      return v;
+    };
+    p.tariff = rng("tariff", "C2 «Тариф, Мбит/с»", 10, 10000, true) ?? 500;
+    const area = rng("area", "A2 «Общая площадь, м²»", 15, 300); if (area !== null) p.area = area;
+    if (fm.cls) p.cls = fm.cls; else p.rooms = rng("rooms", "A3 «Число комнат»", 0, 5, true) ?? 2;
+    if (fm.constr) p.constr = fm.constr;
+    const lw = rng("L_W1", "B1 «Потери несущей стены, дБ»", 1, 40); if (lw !== null) p.L_W1 = lw;
+    const pl = rng("pl_mbps", "D4 «Тест Powerline, Мбит/с»", 1, 2500); if (pl !== null) p.pl_mbps = pl;
+    const b = rng("budget", "G2 «Бюджет, ₽»", 1, 10000000); if (b !== null) p.budget = b;
+    for (const k of DEV_KEYS) {
+      const v = num(fm.dev?.[k]);
+      if (v === null || v < 0 || v > 200 || !Number.isInteger(v)) { if (v !== null || (fm.dev?.[k] ?? "") !== "") err.push(`F1 «${NE.DEV[k][0]}»: целое число 0–200`); p.dev[k] = 0; }
+      else p.dev[k] = v;
+    }
+    if (!Object.values(p.dev).some((v) => v > 0)) err.push("F1: укажите хотя бы одно устройство");
+    p.user = (fm.user || []).map(userParams);
+    return { p, err };
+  }
+
+  // ---------------------------------------------------------------- план квартиры (SVG): помещения, стены, узлы, кабель, карта RSSI 5 ГГц
+  const RSSI = [[-40, "#006837", "≥ −40"], [-50, "#1a9850", "−50…−40"], [-60, "#66bd63", "−60…−50"], [-67, "#a6d96a", "−67…−60"],
+    [-72, "#fee08b", "−72…−67"], [-80, "#fc8d59", "−80…−72"], [-Infinity, "#d73027", "< −80"]];
+  const rssiColor = (P) => RSSI.find(([t]) => P >= t)[1];
+  const ROOM_FILL = { "ж": "#f5f5f5", "к": "#fff8e1", "с": "#e3f2fd", "п": "#eeeeee", "х": "#e0e0e0" };
+  const WALL = { W1: [16, "#263238"], W2: [10, "#455a64"], W3: [6, "#78909c"], W4: [5, "#a1887f"], W6: [10, "#1565c0"], W7a: [10, "#455a64"], W7b: [16, "#263238"] };
+  const c = (v) => Math.round(v * 100);   // метры → сантиметры: в SVG целые координаты и шрифт обычного размера
+  function crossings(g, a, b) {   // сколько стен пересекает отрезок a–b (дверь — половина)
+    let n = 0;
+    for (const [x1, y1, x2, y2, t] of g.walls) {
+      if (t === "O") continue;
+      const d1 = (b[0] - a[0]) * (y1 - a[1]) - (b[1] - a[1]) * (x1 - a[0]), d2 = (b[0] - a[0]) * (y2 - a[1]) - (b[1] - a[1]) * (x2 - a[0]);
+      const d3 = (x2 - x1) * (a[1] - y1) - (y2 - y1) * (a[0] - x1), d4 = (x2 - x1) * (b[1] - y1) - (y2 - y1) * (b[0] - x1);
+      if (d1 * d2 < 0 && d3 * d4 < 0) n += t === "W4" ? 0.5 : 1;
+    }
+    return n;
+  }
+  function planSvg(R, o) {
+    const g = R.geom, pad = 0.6, out = [];
+    out.push(`<svg class="nc-plan" viewBox="${c(-pad)} ${c(-pad)} ${c(g.W + 2 * pad)} ${c(g.H + 2 * pad)}" xmlns="http://www.w3.org/2000/svg" role="img">`,
+      `<title>${esc(g.title)}: ${o ? "уровень сигнала 5 ГГц для варианта «" + esc(o.name) + "»" : "типовой план"}</title>`,
+      `<rect x="${c(-pad)}" y="${c(-pad)}" width="${c(g.W + 2 * pad)}" height="${c(g.H + 2 * pad)}" fill="#fff"/>`);
+    for (const [, t, rs] of g.rooms) for (const [x0, y0, x1, y1] of rs)
+      out.push(`<rect x="${c(x0)}" y="${c(y0)}" width="${c(x1) - c(x0)}" height="${c(y1) - c(y0)}" fill="${ROOM_FILL[t] || "#f5f5f5"}"/>`);
+    if (o && R.map) {
+      const st = c(R.map.step);
+      out.push(`<g shape-rendering="crispEdges">`);
+      for (const [x, y, P] of R.map.pts) out.push(`<rect x="${c(x) - st / 2}" y="${c(y) - st / 2}" width="${st}" height="${st}" fill="${rssiColor(P)}"/>`);
+      out.push(`</g>`);
+    }
+    for (const [x1, y1, x2, y2, t] of g.walls) {
+      if (t === "O") continue;
+      const [w, col] = WALL[t] || [8, "#546e7a"];
+      out.push(`<line x1="${c(x1)}" y1="${c(y1)}" x2="${c(x2)}" y2="${c(y2)}" stroke="${col}" stroke-width="${w}" stroke-linecap="square"/>`);
+    }
+    for (const [name, , rs] of g.rooms) {
+      const [x0, y0, x1, y1] = rs.reduce((a, r) => ((r[2] - r[0]) * (r[3] - r[1]) > (a[2] - a[0]) * (a[3] - a[1]) ? r : a));
+      out.push(`<text x="${c((x0 + x1) / 2)}" y="${c((y0 + y1) / 2)}" class="nc-room">${esc(name)}</text>`);
+    }
+    const e = g.pos.entry;
+    out.push(`<rect x="${c(e[0]) - 17}" y="${c(e[1]) - 17}" width="34" height="34" fill="#fff" stroke="#e65100" stroke-width="6"/>`,
+      `<text x="${c(e[0])}" y="${c(e[1]) + 48}" class="nc-lab">ввод</text>`);
+    if (o) {
+      o.aps.forEach((a, i) => {
+        if (!o.cable[i]) return;
+        const s = o.arch === "Б" ? e : o.aps[0], pl = o.arch === "В-PL", k1 = [a[0], s[1]], k2 = [s[0], a[1]];   // трасса из двух отрезков: меньше стен
+        const k = crossings(g, s, k1) + crossings(g, k1, a) <= crossings(g, s, k2) + crossings(g, k2, a) ? k1 : k2;
+        out.push(`<polyline points="${c(s[0])},${c(s[1])} ${c(k[0])},${c(k[1])} ${c(a[0])},${c(a[1])}" fill="none" stroke="${pl ? "#6a1b9a" : "#e65100"}" stroke-width="7" stroke-dasharray="${pl ? "5 12" : "25 12"}"/>`);
+      });
+      o.aps.forEach((a, i) => out.push(`<circle cx="${c(a[0])}" cy="${c(a[1])}" r="26" fill="${i ? "#00897b" : "#283593"}" stroke="#fff" stroke-width="6"/>`,
+        `<text x="${c(a[0])}" y="${c(a[1])}" class="nc-ap">${i + 1}</text>`));
+    }
+    out.push("</svg>");
+    return out.join("");
+  }
+  function legend(R, o) {
+    const kpi = R.sh3.kpi;
+    return (o ? `<p class="nc-legend"><b>Уровень сигнала 5 ГГц, дБм</b> (медиана): ${RSSI.map(([, col, t]) => `<span><i style="background:${col}"></i>${t}</span>`).join("")}<br>` +
+      `<small>KPI уровня «${esc(kpi.name)}» — P<sub>z</sub> ≥ ${f(kpi.Pz)} дБм в худшей зоне с запасом на замирания z·σ, поэтому медиана на карте должна быть выше порога.</small></p>` : "") +
+      `<p class="nc-legend"><span><i class="nc-sq"></i>ввод кабеля</span><span><i class="nc-dot" style="background:#283593"></i>1 — корневой узел</span>` +
+      `<span><i class="nc-dot" style="background:#00897b"></i>2, 3 — спутники</span><span><i class="nc-ln"></i>кабель (схема трассы)</span>` +
+      `<span>толщина линии — тип стены: несущая, перегородка, дверь</span></p>`;
+  }
+
+  // ---------------------------------------------------------------- результат
+  const td = (v) => `<td>${v}</td>`;
+  const table = (head, rows, cls = "") => `<div class="nc-tw ${cls}"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map(td).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const box = (kind, html) => `<div class="admonition ${kind}"><p>${html.charAt(0).toUpperCase() + html.slice(1)}</p></div>`;
+  const kOf = (x, lv) => (lv === 3 ? x.K95 : x.K90);
+  function variantRows(R) {
+    const lv = R.input.level, rows = [];
+    const add = (label, hint, x) => rows.push([`<b title="${esc(hint)}">${label}</b>`,
+      `<b>${esc(x.name)}</b><br><small>${esc(x.src)}${x.wifi ? ", " + esc(x.wifi) : ""}${x.cls ? ", " + esc(x.cls) : ""}</small>` +
+        (x.notes && x.notes.length ? `<br><small class="nc-note">${x.notes.map(esc).join("; ")}</small>` : ""),
+      `<span title="${esc(NE.ARCH_NAME[x.arch])}">${esc(x.arch)}</span><br><small>узлов: ${x.n}${x.kits && x.kits !== x.n ? `, комплектов: ${x.kits}` : ""}${x.L ? `, кабель ${f(x.L)} м` : ""}</small>`,
+      `${f(x.TCPz)}<br><small>P<sub>z</sub> ${f(x.Pz, 1)} дБм, K ${f(kOf(x, lv), 1)} %</small>`,
+      `${rub(x.tco)}<br><small>CAPEX ${rub(x.capex)}</small>`, f(x.S, 3)]);
+    for (const k of ["opt", "eco", "res", "best_market"]) if (R.rec[k]) add(ROLE[k], ROLE_HINT[k], R.rec[k]);
+    for (const u of R.rec.user || []) add("Своё", "пользовательское оборудование (G3): расчёт наравне с каталогом", u);
+    return rows;
+  }
+  const archs = (R) => [...new Set(["opt", "eco", "res", "best_market"].filter((k) => R.rec[k]).map((k) => R.rec[k].arch).concat((R.rec.user || []).map((u) => u.arch)))];
+  function render(R, meta = {}) {
+    const s2 = R.sh2, s3 = R.sh3, kpi = s3.kpi, lv = R.input.level, o = R.rec.opt, a = R.arch_ref, h = [];
+    const kz = lv === 3 ? "1,645" : "1,28";
+    h.push(`<h2 id="nc-res">Результат расчёта</h2>`);
+    h.push(table(["Показатель", "Значение"], [
+      ["Код квартиры (Ш2)", `<b>${esc(s2.code)}</b> — ${esc(R.geom.title)}; ${f(s2.area, 1)} м², масштаб плана k = ${f(s2.k, 3)}`],
+      ["Индекс сложности у ввода, I<sub>сл</sub>", `${f(s2.ic_A.Ic, 1)} дБ (до помещения «${esc(s2.ic_A.room)}»), допустимо L<sub>доп</sub> = ${f(s2.ic_A.Ldop, 1)} дБ → ${s2.ic_A.one_node ? "один узел у ввода может справиться" : "одного узла у ввода мало"}`],
+      ["Индекс сложности из центра", `${f(s2.ic_B.Ic, 1)} дБ (до «${esc(s2.ic_B.room)}»), L<sub>доп</sub> = ${f(s2.ic_B.Ldop, 1)} дБ → ${s2.ic_B.one_node ? "одного узла в центре достаточно" : "одного узла в центре мало"}`],
+      ["Требуемая скорость (Ш3)", `B<sub>треб</sub> = ${f(s3.B, 1)} Мбит/с; с учётом тарифа B<sub>эфф</sub> = ${f(s3.Beff, 1)} Мбит/с; устройств N = ${s3.N}`],
+      [`KPI уровня «${esc(kpi.name)}»`, `покрытие K ≥ ${kpi.K} % (z = ${kz}); уровень в худшей зоне P<sub>z</sub> ≥ ${f(kpi.Pz)} дБм; SNR ≥ ${kpi.SNR} дБ; TCP ≥ ${kpi.TCP} Мбит/с; Wi-Fi ≥ ${kpi.std}; WAN ≥ ${f(kpi.wan)} Мбит/с`],
+      ["Архитектура по дереву решений (Ш5)", a ? `<b>${esc(a.arch)}</b> — ${esc(NE.ARCH_NAME[a.arch])}: TCP<sub>z</sub> ${f(a.TCPz)} Мбит/с, K ${f(kOf(a, lv), 1)} %, P<sub>z</sub> ${f(a.Pz, 1)} дБм, кабель ${f(a.L)} м (эталонный узел)` : "нет — см. предупреждение"],
+    ]));
+    if (s2.warn) h.push(box("warning", esc(s2.warn)));
+    if (R.flag) h.push(box("danger", esc(R.flag)));
+    if (!R.robust.stable && R.robust.note) h.push(box("warning", `${esc(R.robust.note)}. Проверка: ${R.robust.variants.map(([l, v]) => `${esc(l)} → ${esc(v ?? "нет")}`).join("; ")}.`));
+    if (R.seg_note) h.push(box("note", esc(R.seg_note)));
+    h.push(`<h3>Подобранное оборудование (Ш9)</h3>`);
+    const rows = variantRows(R);
+    if (rows.length) {
+      h.push(table(["Вариант", "Модель", "Схема", "TCP<sub>z</sub>, Мбит/с", "TCO 5 лет", "Балл S"], rows, "nc-var"));
+      h.push(`<p><small>${Object.keys(ROLE).filter((k) => R.rec[k]).map((k) => `<b>${ROLE[k]}</b> — ${ROLE_HINT[k]}`).join("; ")}. ` +
+        `Схемы: ${archs(R).map((a) => `${esc(a)} — ${esc(NE.ARCH_NAME[a])}`).join("; ")}.</small></p>`);
+    }
+    else h.push(box("danger", "Ни один вариант из каталога не выполняет KPI уровня."));
+    const fb = R.rec.kt_fallback;
+    if (fb) h.push(box("note", `Парк К Телеком: ${esc(fb.name)} × ${fb.n} (${esc(fb.arch)}) — TCP<sub>z</sub> ${f(fb.TCPz)} Мбит/с, P<sub>z</sub> ${f(fb.Pz, 1)} дБм, уровень ${fb.level}${fb.conditional ? ", условно" : ""}: ${esc(fb.why)}.`));
+    const be = R.best_effort;
+    if (be) h.push(box("warning", `${esc(be.why)}. Лучший вариант: ${esc(be.name)} (${esc(be.src)}), ${esc(be.arch)}, TCP<sub>z</sub> ${f(be.TCPz)} Мбит/с, P<sub>z</sub> ${f(be.Pz, 1)} дБм.` +
+      (be.cond && !R.input.pl_mbps ? " Проведите тест Powerline, укажите результат в поле D4 и пересчитайте." : "")));
+    const ux = R.excluded.filter((x) => x.user);
+    if (ux.length) h.push(box("note", "Своё оборудование не подошло: " + ux.map((x) => `${esc(x.name)} — ${x.why.map(esc).join("; ")}` +
+      (x.best ? ` (лучший расчёт: ${esc(x.best.arch)}, TCP<sub>z</sub> ${f(x.best.TCPz)} Мбит/с, уровень ${x.best.level})` : "") + (x.warn && x.warn.length ? `; ${x.warn.map(esc).join("; ")}` : "")).join(" · ")));
+    for (const u of R.rec.user || []) if (u.warn && u.warn.length) h.push(box("warning", `${esc(u.name)}: ${u.warn.map(esc).join("; ")}`));
+    if (o) {
+      h.push(`<p><small>Оптимум: стоимость ${rub(o.capex)} (оборудование ${rub(o.eq)} + монтаж), электроэнергия за 5 лет ${rub(o.opex)}, ${f(o.rub_m2)} ₽/м²; ` +
+        `запас к KPI: P<sub>z</sub> +${f(o.margin.Pz, 1)} дБ, TCP × ${f(o.margin.TCP, 2)}, ёмкость C × ${f(o.margin.C, 2)}.</small></p>`);
+    }
+    h.push(`<h3>План квартиры и покрытие (Ш4, Ш6)</h3>`, `<div class="nc-planbox">${planSvg(R, o)}</div>`, legend(R, o));
+    if (o) {
+      h.push(`<h3>Размещение, частоты, кабель (Ш6–Ш8)</h3>`);
+      h.push(table(["Узел", "Роль", "Координаты, м", "Помещение"], o.aps.map((p, i) => [String(i + 1), esc(R.sh6.roles[i]), `${f(p[0], 2)}; ${f(p[1], 2)}`, esc(roomAt(R.geom, p))])));
+      h.push(`<ul>${R.sh7.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`);
+      if (R.sh8.length) h.push(table(["№", "Откуда", "Куда", "Длина, м", "Кабель", "Трасса"], R.sh8.map((c) => [c.n, esc(c.frm), esc(c.to), f(c.L), esc(c.cat), esc(c.route)])));
+      else h.push(`<p>Кабель прокладывать не нужно.</p>`);
+      h.push(`<h3>Паспорт сети: что проверить замером (Ш11–Ш12)</h3>`);
+      h.push(table(["Помещение", "Точка замера (центр), м", "Ожидаемый уровень 5 ГГц, дБм"], R.sh12.points.map((pt) => [esc(pt.room), `${f(pt.x, 2)}; ${f(pt.y, 2)}`, f(pt.P, 1)])));
+      h.push(`<p><small>В худшей зоне: P<sub>z</sub> ${f(R.sh12.Pz, 1)} дБм, TCP<sub>z</sub> ${f(R.sh12.TCPz)} Мбит/с — для уровня «${esc(R.sh12.kpi)}». Замер «после» сравнивается с этими значениями.</small></p>`);
+    }
+    h.push(`<details><summary>Дерево архитектур (Ш5) и устойчивость решения</summary>`);
+    h.push(table(["Архитектура", "Итог", "K, %", "P<sub>z</sub>, дБм", "TCP<sub>z</sub>, Мбит/с", "C, Мбит/с", "Кабель, м", "Не выполнено"], R.tree.map((t) => t.skip
+      ? [esc(t.arch) + " — " + esc(NE.ARCH_NAME[t.arch]), "не рассматривается", "—", "—", "—", "—", "—", "—"]
+      : [esc(t.arch) + " — " + esc(NE.ARCH_NAME[t.arch]), t.ok ? (t.cond ? "условно ✔" : "✔") : "✘", f(kOf(t, lv), 1), f(t.Pz, 1), f(t.TCPz), f(t.C), f(t.L), t.fails.map(esc).join("; ") || "—"])));
+    h.push(`<p><small>Устойчивость (площадь ±5 %, потери несущей стены ±2 дБ): ${R.robust.variants.map(([l, v]) => `${esc(l)} → ${esc(v ?? "нет")}`).join("; ") || "не проверялась"} — ${R.robust.stable ? "решение устойчиво" : "решение на границе"}.</small></p></details>`);
+    h.push(`<details><summary>Требуемая скорость по устройствам (Ш3)</summary>`);
+    h.push(table(["Устройство", "Шт.", "Скорость, Мбит/с", "k<sub>одн</sub>", "Вклад, Мбит/с"], s3.rows.map((r) => [esc(r[0]), r[1], f(r[2], 1), f(r[3], 3), f(r[4], 2)])));
+    h.push(`<p><small>${esc(s3.note)}. B<sub>треб</sub> = (Σ + 6) × 1,25 = ${f(s3.B, 2)} Мбит/с.</small></p></details>`);
+    h.push(`<details><summary>Все подходящие варианты (${R.rank.length}) — ранжирование по баллу S</summary>`);
+    h.push(table(["№", "Модель", "Источник", "Узлов", "Архитектура", "TCP<sub>z</sub>", "P<sub>z</sub>", "TCO 5 лет", "S", "k1…k5"], R.rank.map((x, i) =>
+      [i + 1, esc(x.name), esc(x.src), x.n, esc(x.arch), f(x.TCPz), f(x.Pz, 1), rub(x.tco), f(x.S, 3), x.k.map((v) => f(v, 2)).join(" / ")])));
+    h.push(`<p><small>k1 — радиопоказатели, k2 — скорость, k3 — порты, k4 — функции, k5 — стоимость; веса AHP уровня «${esc(kpi.name)}».</small></p></details>`);
+    h.push(`<details><summary>Исключённые модели (${R.excluded.length})</summary><ul>${R.excluded.map((x) => `<li>${esc(x.name)} <small>(${esc(x.src)})</small> — ${x.why.map(esc).join("; ")}</li>`).join("")}</ul></details>`);
+    h.push(`<p class="nc-foot"><small>Каталог: ${R.counts.total} моделей${meta.kt !== undefined ? ` (парк К Телеком — ${meta.kt})` : ""}, данные на ${dmy(meta.updated)}; подошло ${R.counts.passed}, из парка ${R.counts.passed_kt}. ` +
+      `Расчёт — ${esc(R.version)}; это прогноз по типовому плану, итог проверяется замером «после» (Ш11).</small></p>`);
+    return h.join("\n");
+  }
+  function roomAt(g, p) {
+    for (const [name, , rs] of g.rooms) for (const [x0, y0, x1, y1] of rs) if (p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1) return name;
+    return "—";
+  }
+
+  root.NetCalcUI = { defaults, toParams, userParams, render, planSvg, rssiColor };
+  if (typeof document === "undefined") return;
+
+  // ---------------------------------------------------------------- страница
+  const SRC = document.currentScript && document.currentScript.src;   // адрес calc.js — от него ищем ../data/*.json
+  const getJson = (name) => fetch(new URL("../data/" + name, SRC || location.href)).then((r) => { if (!r.ok) throw new Error(name + ": " + r.status); return r.json(); });
+  let eng = null, meta = {}, users = [], lastR = null;
+  const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
+  const row = (code, label, ctl, hint = "") => `<label class="nc-row"><span><b class="nc-code">${code}</b> ${label}${hint ? ` <small>${hint}</small>` : ""}</span>${ctl}</label>`;
+  function form(plans) {
+    const d = defaults(), W = plans.WT, PL = NE.PLAN_OF;
+    const lv = (n) => { const L = NE.LEVELS[n]; return `${L.name} — K ≥ ${L.K} %, TCP ≥ ${L.TCP} Мбит/с`; };
+    return `<form id="nc-form" novalidate onsubmit="return false">
+<fieldset><legend>Квартира (блоки A, B чек-листа)</legend>
+${row("A3", "Число комнат", `<select name="rooms">${[0, 1, 2, 3, 4, 5].map((n) => opt(n, n ? n : "студия", String(n) === d.rooms)).join("")}</select>`)}
+${row("A2", "Общая площадь, м²", `<input name="area" type="number" min="15" max="300" step="0.1" placeholder="как в типовом плане">`, "пусто — площадь типового плана")}
+${row("A4", "Тип планировки", `<select name="cls">${opt("", "авто — по числу комнат и площади", true)}${Object.keys(PL).map((c) => opt(c, `${c} — ${plans.plans[PL[c]].title} (${PL[c]})`)).join("")}</select>`)}
+${row("A1", "Тип дома", `<select name="constr">${opt("", "как в типовом плане", true)}${[["П", "П — панельный"], ["М", "М — монолитный"], ["К", "К — кирпичный"], ["С", "С — смешанный"]].map(([v, t]) => opt(v, t)).join("")}</select>`)}
+${row("B1", "Потери несущей стены на 5 ГГц, дБ", `<input name="L_W1" type="number" min="1" max="40" step="0.5" placeholder="по типу дома">`, `пусто — ж/б ${W.W1[1]} дБ, кирпич ${W.W1k[1]} дБ`)}
+</fieldset>
+<fieldset><legend>Ввод провайдера и кабель (C, D)</legend>
+${row("C2", "Тариф, Мбит/с", `<input name="tariff" type="number" min="10" max="10000" step="10" value="${d.tariff}">`)}
+${row("C3", "Место ввода кабеля", `<select name="entry_at">${opt("прихожая", "прихожая", true)}${opt("центр", "центр квартиры")}</select>`)}
+${row("C4", "Нужно IPTV", `<input name="iptv" type="checkbox">`)}
+${row("D3", "Можно проложить кабель", `<select name="cable_ok">${opt("1", "да (плинтус, кабель-канал)", true)}${opt("", "нет")}</select>`)}
+${row("D4", "Тест Powerline между точками, Мбит/с", `<input name="pl_mbps" type="number" min="1" max="2500" placeholder="не проводился">`, "если кабель нельзя")}
+</fieldset>
+<fieldset><legend>Радиообстановка (E)</legend>
+${row("E2", "Свободны каналы 36–64 (5 ГГц)", `<select name="air160">${opt("1", "да — на премиальном уровне 160 МГц", true)}${opt("", "нет — 80 МГц")}</select>`, "по анализатору Wi-Fi")}
+</fieldset>
+<fieldset><legend>Пользователи и устройства (F)</legend>
+<p class="nc-sub"><b class="nc-code">F1</b> Устройства, одновременно в сети, шт.</p>
+${DEV_KEYS.map((k) => row("", esc(NE.DEV[k][0]), `<input name="dev_${k}" type="number" min="0" max="200" step="1" value="${d.dev[k]}">`, `${f(NE.DEV[k][1], 1)} Мбит/с, k<sub>одн</sub> ${f(NE.DEV[k][2], 3)}`)).join("\n")}
+${row("F2", "Есть клиенты Wi-Fi 6E/7 и нужен диапазон 6 ГГц", `<input name="need6" type="checkbox">`)}
+${row("F4", "Нужен VPN на роутере (удалённая работа)", `<input name="vpn" type="checkbox">`)}
+</fieldset>
+<fieldset><legend>Требования и ограничения (G)</legend>
+${row("G1", "Уровень обслуживания", `<select name="level">${[1, 2, 3].map((n) => opt(n, lv(n), String(n) === d.level)).join("")}</select>`)}
+${row("G2", "Бюджет на оборудование и монтаж, ₽", `<input name="budget" type="number" min="1" step="100" placeholder="без ограничения">`)}
+<details id="nc-own"><summary><b class="nc-code">G3</b> Своё оборудование — рассчитать наравне с каталогом</summary>
+<div class="nc-own">
+${row("", "Название *", `<input name="u_name" type="text" maxlength="80" placeholder="например, TP-Link Archer AX55">`)}
+${row("", "Тип *", `<select name="u_type">${USER_TYPES.map((t, i) => opt(t, t, !i)).join("")}</select>`)}
+${row("", "Стандарт Wi-Fi *", `<select name="u_std">${["4", "5", "6", "6E", "7"].map((s) => opt(s, "Wi-Fi " + s, s === "6")).join("")}</select>`)}
+${row("", "Диапазоны *", BANDS.map((b) => `<span class="nc-chk"><input type="checkbox" name="u_band" value="${b}"${b !== "6" ? " checked" : ""}> ${b} ГГц</span>`).join(" "))}
+${row("", "WAN, Мбит/с *", `<select name="u_wan">${[100, 1000, 2500, 5000, 10000].map((w) => opt(w, w, w === 1000)).join("")}</select>`)}
+${row("", "LAN, шт *", `<input name="u_lan" type="number" min="0" max="16" value="4">`)}
+${row("", "Класс скорости", `<select name="u_cls">${opt("", "не знаю — по стандарту", true)}${Object.keys(NE.CLASS_DEF).map((c) => opt(c, c)).join("")}</select>`)}
+${row("", "ЭИИМ 2,4 / 5 / 6 ГГц, дБм", BANDS.map((b) => `<input name="u_e${b}" type="number" min="0" max="36" step="0.5" class="nc-s" placeholder="${b}">`).join(" "), "из datasheet; пусто — по умолчанию")}
+${row("", "Mesh-протокол", `<select name="u_mesh">${opt("", "не знаю / нет", true)}${MESH.map((m) => opt(m, m)).join("")}</select>`, "без Mesh считается только один узел")}
+${row("", "Узлов в комплекте", `<input name="u_u" type="number" min="1" max="6" value="1">`)}
+${row("", "Цена комплекта, ₽", `<input name="u_price" type="number" min="0" step="100" placeholder="медиана рынка по классу">`)}
+${row("", "Уже куплено (первый узел есть)", `<input name="u_owned" type="checkbox" checked>`)}
+<p><button type="button" id="nc-uadd" class="md-button">Добавить в расчёт</button> <span id="nc-umsg" class="nc-err"></span></p>
+<ul id="nc-ulist"></ul>
+</div></details>
+</fieldset>
+<p><button id="nc-run" class="md-button md-button--primary" type="submit">Рассчитать</button> <a id="nc-json" href="#" hidden>Скачать расчёт (JSON)</a></p>
+<div id="nc-err" class="nc-err"></div>
+</form>
+<div id="nc-out"></div>`;
+  }
+  function readForm(fe) {
+    const v = (n) => fe.elements[n].value, c = (n) => fe.elements[n].checked;
+    const fm = { rooms: v("rooms"), area: v("area"), cls: v("cls"), constr: v("constr"), L_W1: v("L_W1"), tariff: v("tariff"), entry_at: v("entry_at"),
+      iptv: c("iptv"), cable_ok: !!v("cable_ok"), pl_mbps: v("pl_mbps"), air160: !!v("air160"), need6: c("need6"), vpn: c("vpn"), level: v("level"),
+      budget: v("budget"), dev: {}, user: users };
+    for (const k of DEV_KEYS) fm.dev[k] = v("dev_" + k);
+    return fm;
+  }
+  function readUser(fe) {
+    const v = (n) => fe.elements[n].value;
+    return { name: v("u_name"), type: v("u_type"), std: v("u_std"), bands: [...fe.querySelectorAll('[name="u_band"]:checked')].map((x) => x.value),
+      wan: v("u_wan"), lan: v("u_lan"), cls: v("u_cls"), eirp: Object.fromEntries(BANDS.map((b) => [b, v("u_e" + b)])), mesh: v("u_mesh"),
+      u: v("u_u"), price: v("u_price"), owned: fe.elements.u_owned.checked };
+  }
+  function showUsers(el) {
+    el.querySelector("#nc-ulist").innerHTML = users.map((u, i) => `<li>${esc(u.name)} — ${esc(u.type)}, Wi-Fi ${esc(u.std)}, ${u.bands.map(esc).join(" / ")} ГГц, WAN ${esc(u.wan)}` +
+      `${u.owned ? ", уже есть" : ""} <button type="button" class="nc-del" data-i="${i}" title="Убрать">✕</button></li>`).join("");
+  }
+  function run(el) {
+    const fe = el.querySelector("#nc-form"), out = el.querySelector("#nc-out"), er = el.querySelector("#nc-err"), dl = el.querySelector("#nc-json");
+    const { p, err } = toParams(readForm(fe));
+    er.innerHTML = err.map(esc).join("<br>");
+    if (err.length) { out.innerHTML = ""; dl.hidden = true; return; }
+    try { lastR = eng.calc(p); } catch (e) { er.textContent = "Ошибка расчёта: " + e.message; out.innerHTML = ""; dl.hidden = true; return; }
+    out.innerHTML = render(lastR, meta);
+    dl.hidden = false;
+    out.querySelector("#nc-res").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  async function init() {
+    const el = document.getElementById("netcalc"); if (!el) return;
+    el.innerHTML = "<p>Загрузка данных калькулятора…</p>";
+    let plans, cat;
+    try { [plans, cat] = await Promise.all([getJson("plans.json"), getJson("equipment.json")]); }
+    catch (e) { el.innerHTML = `<p class="nc-err">Не удалось загрузить данные калькулятора (${esc(e.message)}). Обновите страницу.</p>`; return; }
+    const items = (cat.items || []).filter((i) => i && i.name && isNum(i.std) && isNum(i.price) && Array.isArray(i.bands));
+    if (!items.length) { el.innerHTML = `<p class="nc-err">Данные об оборудовании в устаревшем формате — обновите страницу (Ctrl+F5).</p>`; return; }
+    eng = NE.create({ plans, catalog: { items } });
+    meta = { updated: cat.updated, kt: items.filter((i) => i.src === "К Телеком").length };
+    el.innerHTML = form(plans);
+    const fe = el.querySelector("#nc-form");
+    fe.addEventListener("submit", (ev) => { ev.preventDefault(); run(el); });
+    el.querySelector("#nc-uadd").addEventListener("click", () => {
+      const msg = el.querySelector("#nc-umsg"), u = readUser(fe);
+      try { eng.userItem(userParams(u), users.length); } catch (e) { msg.textContent = e.message; return; }
+      if (users.length >= 5) { msg.textContent = "не больше 5 моделей"; return; }
+      users.push(u); msg.textContent = ""; fe.elements.u_name.value = ""; showUsers(el);
     });
-    box.querySelector("#nc-dist").addEventListener("input", (e) => (e.target.dataset.touched = 1));
-    box.querySelector("#nc-run").addEventListener("click", run);
-  }
-  function run() {
-    const box = document.getElementById("netcalc");
-    const v = (id) => box.querySelector(id).value;
-    const walls = {}, dev = {};
-    box.querySelectorAll("[data-wall]").forEach((i) => (walls[i.dataset.wall] = +i.value || 0));
-    box.querySelectorAll("[data-dev]").forEach((i) => (dev[i.dataset.dev] = +i.value || 0));
-    const r = compute({ area: +v("#nc-area"), rooms: +v("#nc-rooms"), layout: v("#nc-layout"), build: v("#nc-build"),
-      dist: +v("#nc-dist"), walls, dev, cable: v("#nc-cable") === "yes", plc: v("#nc-plc"), segment: v("#nc-seg"),
-      eirp: +v("#nc-eirp"), z: 1.28, sigma: +v("#nc-sigma"), kOdn: 0.7, kZap: 0.3 });
-    const devices = Object.values(dev).reduce((a, b) => a + b, 0);
-    const need = { nodes: r.nodes, area: +v("#nc-area") || 0, segment: v("#nc-seg"), devices, breq: r.breq, tariff: +v("#nc-tariff"),
-      vpn: v("#nc-vpn") === "yes", budget: +v("#nc-budget") || 0, wired: v("#nc-cable") === "yes" || v("#nc-plc") === "yes", outdoor: v("#nc-outdoor") === "yes" };
-    renderEq(need);
-    box.querySelector("#nc-out").innerHTML = `
-      <table><tbody>
-      <tr><td>Класс и код квартиры</td><td><b>${r.code}</b></td></tr>
-      <tr><td>Индекс сложности (потери в стенах на худшем пути, 5 ГГц)</td><td>${f1(r.isl)} дБ — ${r.grade} сложность</td></tr>
-      <tr><td>Уровень в худшей точке от одного роутера</td><td>5 ГГц: ${f1(r.P55)} дБм · 2,4 ГГц: ${f1(r.P24)} дБм</td></tr>
-      <tr><td>Требуется (порог ${r.seg.rssi} дБм + запас)</td><td>${f1(r.need)} дБм → ${r.oneOk ? "✅ хватает одного роутера" : "❌ одного роутера мало"}</td></tr>
-      <tr><td>Рекомендуемая архитектура</td><td><b>${r.arch}</b></td></tr>
-      <tr><td>Число узлов (оценка)</td><td>${r.nodes}</td></tr>
-      <tr><td>Требуемая скорость</td><td>${f1(r.breq)} Мбит/с</td></tr>
-      <tr><td>Целевые KPI сегмента «${r.seg.name}»</td><td>покрытие ≥ ${r.seg.cover} %, RSSI ≥ ${r.seg.rssi} дБм, TCP в худшей зоне ≥ ${r.seg.tcp} Мбит/с</td></tr>
-      </tbody></table>${r.plcNote ? `<p>${r.plcNote}</p>` : ""}
-      <p><small>Оценка по худшему пути: учитываются потери в свободном пространстве и стенах, отражения не учитываются. Итог проверяется замерами после монтажа.</small></p>`;
-  }
-  function kitName(k) {
-    return k.items.map((i) => `${i.qty > 1 ? i.qty + " × " : ""}${esc(i.m.model)}${i.m.alias ? ` <small>(${esc(i.m.alias)})</small>` : ""}`).join(" + ");
-  }
-  function kitNotes(k) {
-    const n = [...k.notes];
-    for (const i of k.items) {
-      if (i.m.notOnSite) n.push(`${i.m.model}: нет в каталоге сайта k-telecom.org`);
-      if (i.m.diff) n.push(`${i.m.model}: ${i.m.diff}`);
-    }
-    return n.length ? `<br><small>${n.map(esc).join("; ")}</small>` : "";
-  }
-  async function renderEq(need) {
-    const out = document.getElementById("nc-eq"); if (!out) return;
-    out.innerHTML = "<p>Подбор оборудования…</p>";
-    let data;
-    try { data = await loadEq(); } catch (e) { out.innerHTML = "<p>Не удалось загрузить данные об оборудовании К Телеком. Обновите страницу.</p>"; return; }
-    const res = pickEquipment(data.items || [], need);
-    const date = data.updated ? data.updated.split("-").reverse().join(".") : "—";
-    const reasons = Object.entries(res.excluded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${esc(t)} — ${c}`).join("; ");
-    const row = (k, label) => `<tr><td><b>${label}</b></td><td>${kitName(k)}${kitNotes(k)}</td><td>${rub(k.price)}</td><td>Wi-Fi ${k.wifi}</td>
-      <td>${k.nodes}</td><td>до ${Math.round(k.far)} Мбит/с</td><td>${k.area} м² · ${k.clients} устр.</td></tr>`;
-    let html = "<h3>Оборудование из парка К Телеком</h3>";
-    if (res.variants.length) {
-      html += `<table><thead><tr><th>Вариант</th><th>Комплект</th><th>Цена</th><th>Wi-Fi</th><th>Узлов</th><th>Дальняя зона</th><th>Площадь · устройства</th></tr></thead><tbody>
-        ${res.variants.map((v) => row(v.kit, v.labels.join(", "))).join("")}</tbody></table>`;
-    } else {
-      html += `<p><b>В парке К Телеком нет подходящего комплекта — нужна альтернатива с рынка (подбор в И3).</b></p>`;
-      if (res.nearest.length) html += `<p>Ближайшие варианты и что не так:</p><ul>${res.nearest.map((k) =>
-        `<li>${kitName(k)} — ${rub(k.price)}: ${k.violations.map(esc).join(", ")}</li>`).join("")}</ul>`;
-    }
-    if (res.outdoor) html += `<p>Для улицы: <b>${esc(res.outdoor.model)}</b> — ${rub(res.outdoor.price)}. В одну Mesh-сеть объединяется только с Netcraze; с другими — отдельной точкой доступа по кабелю.</p>`;
-    else if (need.outdoor) html += "<p>Уличной точки доступа с заказом партии в парке нет — нужна альтернатива с рынка (И3).</p>";
-    html += `<p><small>Требования: тариф ${need.tariff} Мбит/с, в дальней зоне ≥ ${res.needFar} Мбит/с, устройств: ${need.devices || "не указаны"}, узлов: ${need.nodes}, площадь: ${need.area} м²${need.vpn ? ", VPN" : ""}${need.budget ? `, бюджет до ${rub(need.budget)}` : ""}.
-      Проверено комплектов: ${res.total}, подошло: ${res.passed}${reasons ? `; исключено по причинам: ${reasons}` : ""}.</small></p>
-      <p><small>Оценка по данным парка К Телеком на ${date} (база «Оборудование К Телеком»): площадь, число устройств и тариф — по таблице оператора, радиопараметры моделей уточняются в И3.
-      Варианты: «эконом» — самый дешёвый из подходящих; «оптимум» — лучший по сумме критериев; «запас» — лучший без учёта цены.
-      Веса критериев предварительные (цена ${w(WEIGHTS.price)}, скорость ${w(WEIGHTS.speed)}, поколение Wi-Fi ${w(WEIGHTS.wifi)}, площадь ${w(WEIGHTS.area)}, устройства ${w(WEIGHTS.clients)}) и заменятся весами AHP из И3.
-      Модели, снятые с заказа (распродажа остатков), не предлагаются.</small></p>`;
-    out.innerHTML = html;
+    el.querySelector("#nc-ulist").addEventListener("click", (ev) => {
+      const b = ev.target.closest(".nc-del"); if (!b) return; users.splice(+b.dataset.i, 1); showUsers(el);
+    });
+    el.querySelector("#nc-json").addEventListener("click", (ev) => {
+      ev.preventDefault(); if (!lastR) return;
+      const { map, ...R } = lastR, url = URL.createObjectURL(new Blob([JSON.stringify(R, null, 1)], { type: "application/json" }));
+      const a = document.createElement("a"); a.href = url; a.download = `raschet_${R.sh2.code}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })(typeof window !== "undefined" ? window : globalThis);

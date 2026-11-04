@@ -1,73 +1,67 @@
-// Контрольные примеры подбора оборудования и выгрузки базы «Оборудование К Телеком».
-// Запускаются в проверке сборки (check.yml).
+// Выгрузка базы Notion «Оборудование К Телеком» в каталог калькулятора и проверка docs/assets/data/equipment.json.
+// В check.yml запускается дважды: до выгрузки (файл из репозитория) и после (свежие данные Notion).
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { fromNotionPage, toJson } from "../scripts/equipment.mjs";
-await import("../docs/assets/js/calc.js");
-const { pickEquipment, buildKits } = globalThis.NetCalc;
+import { fromNotionPage, toJson, checkItem, missing, MIN_ITEMS } from "../scripts/equipment.mjs";
+await import("../docs/assets/js/engine.js");
+const NE = globalThis.NetEngine;
+const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
 
-// 1. Перевод записи Notion (формат API) в запись equipment.json
-const T = (s) => [{ plain_text: s }];
-const page = { properties: {
-  "Модель": { title: T("Mercusys Halo H30G (3-pack)") }, "№": { number: 4 }, "Производитель": { select: { name: "Mercusys" } },
-  "Тип": { select: { name: "Mesh-система" } }, "Wi-Fi": { select: { name: "Wi-Fi 5" } },
-  "Диапазоны": { multi_select: [{ name: "2.4 ГГц" }, { name: "5 ГГц" }] }, "LAN, шт": { number: 6 },
-  "Тариф до, Мбит/с": { number: 500 }, "Тариф (как в таблице)": { rich_text: T("100 / 500 Мбит/с") },
-  "Активных устройств": { rich_text: T("15–30") }, "Площадь до, м²": { number: 150 }, "Mesh": { select: { name: "только Halo" } },
-  "VPN": { checkbox: true }, "Цена, ₽": { number: 12900 }, "Заказ партии в офис": { select: { name: "да" } },
-  "Нет в каталоге сайта": { checkbox: false }, "Данные на": { date: { start: "2026-11-03" } },
-} };
-const it = fromNotionPage(page);
-assert.equal(it.model, "Mercusys Halo H30G (3-pack)");
-assert.equal(it.nodes, 3);
-assert.equal(it.wifi, 5);
-assert.deepEqual(it.bands, ["2.4", "5"]);
-assert.equal(it.clients, 30);
-assert.equal(it.mesh, "halo");
-assert.equal(it.order, true);
-assert.equal(fromNotionPage({ properties: { "Модель": { title: T("Без цены") } } }), null); // неполная запись пропускается
-assert.equal(JSON.parse(toJson([it], "notion")).items[0].price, 12900);
-const sale = fromNotionPage({ properties: { ...page.properties, "Заказ партии в офис": { select: { name: "нет — распродажа остатков" } } } });
-assert.equal(sale.order, false);
+// 1. Перевод записи Notion (формат API); записи базы на 03.11.2026
+const T = (s) => ({ title: [{ plain_text: s }] }), RT = (s) => ({ rich_text: s ? [{ plain_text: s }] : [] }), S = (s) => ({ select: s ? { name: s } : null });
+const M = (a) => ({ multi_select: a.map((name) => ({ name })) }), N = (x) => ({ number: x }), C = (b) => ({ checkbox: b });
+const page = (o) => ({ properties: {
+  "№": N(o.n), "Модель": T(o.m), "Производитель": S(o.br), "Тип": S(o.t), "Wi-Fi": S(o.wf), "Класс скорости": RT(o.cls), "Диапазоны": M(o.bands),
+  "Скорость клиента 2×2, Мбит/с": N(o.r2), "MIMO 5 ГГц, потоков": N(o.nss ?? null), "Канал макс., МГц": N(o.ch), "WAN, Мбит/с": N(o.wan ?? null), "LAN, шт": N(o.lan),
+  "LAN ≥ 2,5 Гбит/с": C(false), "Узлов в комплекте": N(o.u), "Mesh-протокол": S(o.mp), "Источник модели": M(o.src), "Цена, ₽": N(o.pk ?? null),
+  "Цена рынка (медиана), ₽": N(o.pm ?? null), "ЭИИМ 2,4 ГГц, дБм": N(o.e24 ?? null), "ЭИИМ 5 ГГц, дБм": N(o.e5 ?? null), "ЭИИМ 6 ГГц, дБм": N(null),
+  "Тариф до, Мбит/с": N(o.tar ?? null), "Потребление узла, Вт": N(o.pw ?? null), "VPN": C(!!o.vpn), "Функции (И3)": RT(o.fn), "Пакет (И3)": M(o.pak || []),
+  "Нет в каталоге сайта": C(!!o.nocat), "Заказ партии в офис": S(o.ord), "Активных устройств": RT(o.dev), "Данные на": { date: { start: "2026-11-03" } } } });
+const mr = { n: 1, m: "Mercusys MR1500X", br: "Mercusys", t: "Роутер", wf: "Wi-Fi 6", cls: "AX1500", bands: ["2.4 ГГц", "5 ГГц"], r2: 1201, nss: 2, ch: 80,
+  wan: 1000, lan: 4, u: 1, mp: "EasyMesh", src: ["К Телеком"], pk: 4400, tar: 1000, vpn: true, ord: "да", dev: "60–100+" };
+let e = fromNotionPage(page(mr));
+assert.deepEqual(checkItem(e), []);
+assert.deepEqual([e.id, e.src, e.std, e.bands, e.price, e.pw, e.pw_default, e.vpn, e.iptv, e.dev_max, e.tariff_max, e.sale_off, e.date],
+  [1, "К Телеком", 6, ["2,4", "5"], 4400, 6, true, 1, null, 100, 1000, false, "2026-11-03"]);
+// модель рынка: цена — медиана продавцов, функции из «Функции (И3)»
+e = fromNotionPage(page({ n: 22, m: "Huawei WiFi AX2 (WS7001-22)", br: "Huawei", t: "Роутер", wf: "Wi-Fi 6", cls: "AX1500", bands: ["2.4 ГГц", "5 ГГц"], r2: 1201, nss: 2,
+  ch: 80, wan: 1000, lan: 2, u: 1, mp: "Huawei Mesh", src: ["Рынок (И3)"], pm: 2999, pw: 6, fn: "IPTV — частично; VPN — нет; USB — нет; ПО — частично", pak: ["П1 — альтернатива"] }));
+assert.deepEqual([e.src, e.price, e.pw_default, e.iptv, e.vpn, e.usb, e.fw, e.pkg], ["Рынок", 2999, false, 0.5, 0, 0, 0.5, ["П1 — альтернатива"]]);
+// Mesh-комплект Halo: спутник с портами 100 Мбит/с, ЭИИМ из datasheet, нет карточки на сайте
+e = fromNotionPage(page({ n: 6, m: "Mercusys Halo H1200G (2-pack)", br: "Mercusys", t: "Mesh-система", wf: "Wi-Fi 5", cls: "AC1200", bands: ["2.4 ГГц", "5 ГГц"], r2: 867,
+  nss: 2, ch: 80, wan: 1000, lan: 4, u: 2, mp: "Halo", src: ["К Телеком"], pk: 7900, e24: 20, e5: 23, tar: 500, vpn: true, nocat: true, ord: "да", dev: "15–30" }));
+assert.deepEqual([e.u, e.sat_port, e.eirp, e.nocat, e.dev_max], [2, 100, { "2,4": 20, "5": 23, "6": null }, true, 30]);
+// распродажа остатков; Wi-Fi 4 без MIMO — по умолчанию 2 потока
+e = fromNotionPage(page({ n: 17, m: "TP-Link TL-WR850N", br: "TP-Link", t: "Роутер", wf: "Wi-Fi 4", cls: "N300", bands: ["2.4 ГГц"], r2: 300, ch: 40, wan: 100, lan: 4, u: 1,
+  mp: "нет", src: ["К Телеком"], pk: 2100, tar: 60, vpn: true, nocat: true, ord: "нет — распродажа остатков", dev: "5–10" }));
+assert.deepEqual([e.sale_off, e.nss, e.std, e.pw], [true, 2, 4, 4]);
+// неполные записи не попадают в каталог
+assert.equal(fromNotionPage(page({ ...mr, pk: null })), null);
+assert.deepEqual(missing(page({ ...mr, pk: null, wan: null })), ["WAN, Мбит/с", "Цена, ₽"]);
+assert.equal(fromNotionPage({ properties: {} }), null);
 
-// 2. Файл данных сайта
-const data = JSON.parse(fs.readFileSync(new URL("../docs/assets/data/equipment.json", import.meta.url), "utf8"));
-const eq = data.items;
-assert.ok(eq.length >= 10, "в equipment.json слишком мало моделей");
-for (const m of eq) for (const f of ["model", "type", "price", "tariff", "area", "clients", "wifi"]) assert.ok(m[f] !== null && m[f] !== undefined && m[f] !== "", `${m.model}: нет поля ${f}`);
+// 2. Файл: одна модель — одна строка, сортировка по №
+const out = toJson([{ ...fromNotionPage(page(mr)), id: 5 }, fromNotionPage(page(mr))], "test");
+assert.equal(out.split("\n").length, 5);
+const parsed = JSON.parse(out);
+assert.deepEqual([parsed.format, parsed.updated, parsed.count, parsed.kt, parsed.items.map((i) => i.id)], ["engine_i4", "2026-11-03", 2, 2, [1, 5]]);
 
-const base = { nodes: 1, area: 55, segment: "optimum", devices: 10, tariff: 300, vpn: false, budget: 0, wired: false, outdoor: false };
-const names = (r) => r.variants.flatMap((v) => v.kit.items.map((i) => i.m.model));
-// 3. Двухкомнатная, один узел: только одиночные устройства, без распродажи и без Wi-Fi 4
-let r = pickEquipment(eq, base);
-assert.ok(r.variants.length >= 1);
-for (const v of r.variants) {
-  assert.equal(v.kit.nodes, 1);
-  assert.ok(v.kit.items.every((i) => i.m.order && i.m.wifi >= 5 && i.m.tariff >= 300));
+// 3. docs/assets/data/equipment.json — годится для движка
+const data = read("../docs/assets/data/equipment.json");
+assert.equal(data.format, "engine_i4", "equipment.json в старом формате");
+assert.ok(data.items.length >= MIN_ITEMS, "в equipment.json слишком мало моделей");
+for (const it of data.items) assert.deepEqual(checkItem(it), [], `${it.name}: неверные поля`);
+assert.equal(new Set(data.items.map((i) => i.id)).size, data.items.length, "номера моделей повторяются");
+assert.ok(data.items.some((i) => i.src === "К Телеком"), "нет моделей парка К Телеком");
+
+// 4. Дымовой расчёт 15 базовых примеров на этом каталоге: без ошибок; архитектура Ш5 от каталога не зависит
+const eng = NE.create({ plans: read("../docs/assets/data/plans.json"), catalog: data });
+let withOpt = 0;
+for (const c of read("./fixtures/cases_i4_base.json").cases) {
+  const r = eng.calc(structuredClone(c.input));
+  assert.equal(r.arch_ref?.arch ?? null, c.expect.arch_ref, `${c.id}: архитектура`);
+  assert.equal(r.counts.total, data.items.length);
+  if (r.rec.opt) withOpt++;
 }
-assert.ok(!buildKits(eq, { ...base, area: 40 }).some((k) => k.main.nodes > 1), "Mesh-комплект не нужен, когда хватает одного узла");
-// 4. Бюджетный сегмент: Wi-Fi 4 допускается, распродажа — нет
-r = pickEquipment(eq, { ...base, area: 30, segment: "budget", tariff: 60, devices: 5 });
-const econ = r.variants.find((v) => v.labels.includes("эконом")).kit;
-assert.equal(econ.wifi, 4);
-assert.ok(econ.items.every((i) => i.m.order));
-assert.ok(r.excluded["снят с заказа (распродажа остатков)"] >= 1);
-// 5. Два узла по радио, тариф 300: Halo не проходит (100 Мбит/с по радио), с кабелем — проходит
-const mesh = { ...base, nodes: 2, area: 85, devices: 15 };
-const halo = (rr) => buildKits(eq, rr).filter((k) => k.main.mesh === "halo");
-assert.ok(halo(mesh).length >= 1);
-assert.ok(halo(mesh).every((k) => k.far < 300));
-assert.ok(halo({ ...mesh, wired: true }).every((k) => k.far >= 300));
-r = pickEquipment(eq, mesh);
-for (const v of r.variants) assert.ok(v.kit.nodes >= 2 && v.kit.mesh && v.kit.far >= 300);
-// 6. Нужен VPN — модели без VPN исключаются; бюджет ограничивает цену
-r = pickEquipment(eq, { ...base, tariff: 100, vpn: true, budget: 4000 });
-for (const v of r.variants) { assert.ok(v.kit.main.vpn); assert.ok(v.kit.price <= 4000); }
-assert.ok(r.excluded["нет VPN"] >= 1);
-// 7. Невыполнимые требования — вариантов нет, показываются ближайшие
-r = pickEquipment(eq, { ...base, nodes: 3, area: 120, tariff: 1000, budget: 3000 });
-assert.equal(r.variants.length, 0);
-assert.ok(r.nearest.length >= 1);
-// 8. Улица — уличная точка доступа с заказом партии
-assert.equal(pickEquipment(eq, { ...base, outdoor: true }).outdoor?.type, "Уличная точка доступа");
-console.log(`Подбор оборудования: контрольные примеры пройдены (моделей в файле: ${eq.length}; источник: ${data.source}, данные на ${data.updated})`);
+assert.ok(withOpt >= 10, `вариант найден только в ${withOpt} из 15 базовых примеров`);
+console.log(`Оборудование: моделей ${data.items.length}, расчёт 15 базовых примеров — вариант найден в ${withOpt}`);
