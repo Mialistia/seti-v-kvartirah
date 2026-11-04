@@ -6,7 +6,7 @@
 // Совпадение с эталоном на Python — 31 контрольный пример (tests/fixtures/cases_i4_base.json, cases_i4_spec.json; tests/engine.test.mjs).
 (function (root) {
   "use strict";
-  const VERSION = "engine_i4 1.2 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt), расчёт И4 не изменился
+  const VERSION = "engine_i4 1.3 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt); 1.3: R.planFor — план и Ш6–Ш8, Ш12 для любого варианта, R.geom.wt — потери стен плана; расчёт И4 не изменился
   const REF_VERSION = "engine_i4 1.0 (04.11.2026)";   // версия эталона на Python (tests/fixtures): 31 пример И4
   // ---------------------------------------------------------------- константы (источники — отчёт И4, табл. 2)
   const BANDS = { "2,4": 2437.0, "5": 5500.0, "6": 6200.0 };      // центральные частоты расчёта, МГц
@@ -675,18 +675,30 @@
       R.kt = ktVariants();
       R.counts = { total: items.length, passed: cand.length, passed_kt: kt.length, excluded: excl.length };
       // Ш6–Ш8, Ш12 для рекомендованного варианта
-      if (rec.opt) {
-        const o = rec.opt;
-        R.sh6 = { aps: o.aps, roles: ["корневой узел"].concat(Array.from({ length: o.n - 1 }, (_, i) => "спутник " + (i + 1))), cable: o.cable };
-        R.sh7 = freqPlan(o, lv); R.sh8 = cableJournal(g, o, q); R.sh12 = passport(g, o, lv);
-        R.map = coverage(g, o.aps, nodeParams(optCand.e, lv, "5").E);
-      }
-      if (R.kt.fb && R.kt.best) {   // в парке нет подходящей модели: план, частоты, кабель и паспорт — для ближайшего варианта парка
-        const o = R.kt.best;
-        R.kt.plan = { sh6: { aps: o.aps, roles: ["корневой узел"].concat(Array.from({ length: o.n - 1 }, (_, i) => "спутник " + (i + 1))), cable: o.cable },
-          sh7: freqPlan(o, lv), sh8: cableJournal(g, o, q), sh12: passport(g, o, lv), map: coverage(g, o.aps, nodeParams(fbSel.e, lv, "5").E) };
-      }
-      R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title };
+      const planOf = (o, e) => ({ sh6: { aps: o.aps, roles: ["корневой узел"].concat(Array.from({ length: o.n - 1 }, (_, i) => "спутник " + (i + 1))), cable: o.cable },
+        sh7: freqPlan(o, lv), sh8: cableJournal(g, o, q), sh12: passport(g, o, lv), map: coverage(g, o.aps, nodeParams(e, lv, "5").E) });
+      if (rec.opt) Object.assign(R, planOf(rec.opt, optCand.e));
+      // в парке нет подходящей модели: план, частоты, кабель и паспорт — для ближайшего варианта парка
+      if (R.kt.fb && R.kt.best) R.kt.plan = planOf(R.kt.best, fbSel.e);
+      // переключатель вариантов на плане (calc.js): planFor(id) — карточка и Ш6–Ш8, Ш12, карта RSSI для любого варианта из R.rank
+      // (в т. ч. своего оборудования), planFor("fb") — для ближайшего варианта парка. Неперечисляемое: не попадает в JSON и эталон И4.
+      const pf = new Map();
+      Object.defineProperty(R, "planFor", { enumerable: false, value: (id) => {
+        const k = String(id);
+        if (pf.has(k)) return pf.get(k);
+        let r = null;
+        if (k === "fb") { if (R.kt.fb && R.kt.best) r = { card: R.kt.best, plan: R.kt.plan }; }
+        else {
+          const c = cand.find((x) => String(x.e.id) === k);
+          if (c) { const crd = c === optCand ? rec.opt : card(c, "свой выбор"); r = { card: crd, plan: c === optCand ? planOf(rec.opt, c.e) : planOf(crd, c.e) }; }
+        }
+        pf.set(k, r);
+        return r;
+      } });
+      // потери стен плана (И2, табл. 4; с учётом типа дома и замера B1): тип → [2,4; 5; 6 ГГц], дБ — для легенды плана
+      const wt = {};
+      for (const w of g.walls) if (w[4] !== "O" && g.WT[w[4]]) wt[w[4]] = g.WT[w[4]].map((x) => pyRound(x, 1));
+      R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title, constr: g.constr, wt };
       return R;
     }
     return { calc, K1MAX, catalog: CAT, plans: PLD, medianPrice, userItem, classify, breq, Ldop };
