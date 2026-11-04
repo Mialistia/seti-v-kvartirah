@@ -183,6 +183,44 @@ assert.deepEqual(err, []); assert.ok(p.plan === nb && p.cls === "К3" && !("room
 assert.match(UI.toParams({ ...UI.defaults(), plan: broken, planErr: LA.check(broken).err }).err.join(" | "), /^Планировка: /);
 assert.ok(GL.has("layout") && LA.draw(nb).startsWith("<svg") && LA.draw(nb, { mini: true }).includes('aria-hidden="true"'));
 
+// 11. Конструктор квартиры (layout.js): отражение, поворот, ширина, дверь, края комнат, обводка, типы стен
+const eq = (a, b) => Math.abs(a - b) < 1e-6, sumA = (pl) => pl.rooms.reduce((a, [, , rs]) => a + rs.reduce((b, r) => b + (r[2] - r[0]) * (r[3] - r[1]), 0), 0);
+for (const cls of Object.keys(NE.PLAN_OF)) {
+  const t = LA.fromTemplate(PLD, cls, null), ok = (pl, msg) => { assert.deepEqual(LA.check(pl).err, [], `${cls}: ${msg}`); near(sumA(pl), pl.W * pl.H, 1e-6, `${cls}: ${msg} — площадь помещений`); return pl; };
+  assert.equal(LA.badRooms(t).size, 0, `${cls}: в типовом плане нет слишком мелких помещений`);
+  const tn = LA.normalize(structuredClone(t));   // отрезки стен на одной прямой — слитые
+  for (const ax of ["x", "y"]) { const m = ok(LA.mirror(t, ax), `отражение ${ax}`); assert.ok(LA.same(LA.mirror(m, ax), tn), `${cls}: двойное отражение ${ax}`); }
+  let ro = t; for (let i = 0; i < 4; i++) { ro = ok(LA.rotate(ro), `поворот ${i + 1}`); if (i === 0) assert.ok(eq(ro.W, t.H) && eq(ro.H, t.W), `${cls}: поворот меняет ширину и длину`); }
+  assert.ok(LA.same(ro, tn), `${cls}: четыре поворота — исходный план`);
+  const st = ok(LA.stretch(t, Math.round(t.W * 1.1 * 20) / 20), "другая ширина"); near(st.W * st.H, t.W * t.H, 0.01, `${cls}: площадь при другой ширине`);
+  const dr = ok(LA.setDoor(t, "верх", 0.5), "дверь сверху"); assert.deepEqual(LA.doorSide(dr), { side: "верх", off: 0.5 }); assert.ok(inside(dr, dr.pos.entry), `${cls}: ввод у новой двери`);
+  t.rooms.forEach((_, ri) => {
+    const es = LA.roomEdges(t, ri);
+    for (const e of es) { assert.ok(e.hi - e.lo > 0.05 && !eq(e.c, 0) && !eq(e.c, e.o === "v" ? t.W : t.H), `${cls}: край комнаты ${ri} внутри квартиры`);
+      const [mn, mx] = LA.range(t, e), m = ok(LA.finish(LA.moveEdge(t, e, e.c + 0.2 * e.s)), `край ${ri} ${e.o} = ${e.c}`);
+      if (mx - e.c >= 0.2 && e.c - mn >= 0.2) assert.ok(!LA.same(m, t), `${cls}: край ${ri} сдвинут`); }
+    const rs = t.rooms[ri][2]; if (rs.length !== 1) return;
+    const r = rs[0], w = r[2] - r[0];
+    try { const m = ok(LA.finish(LA.roomSize(t, ri, "v", w - 0.1)), `ширина комнаты ${ri}`), r2 = m.rooms[ri][2]; if (r2.length === 1) near(r2[0][2] - r2[0][0], w - 0.1, 1e-6, `${cls}: ширина комнаты ${ri}`); }
+    catch (e) { assert.match(e.message, /во всю|только у прямоугольной|короче|меньше|нельзя|упира/, `${cls}: размер комнаты ${ri}: ${e.message}`); }
+  });
+  const bi = t.rooms.findIndex(([, ty]) => ty === "ж"), R = t.rooms[bi][2][0], cx = Math.round((R[0] + R[2]) * 10) / 20, cy = Math.round((R[1] + R[3]) * 10) / 20, cr = [cx - 0.5, cy - 0.5, cx + 0.5, cy + 0.5], sr = LA.snapRect(t, cr);
+  const cv = ok(LA.carve(t, cr, "х", "W2", true), "обводка новой комнаты"); assert.equal(cv.rooms.length, t.rooms.length + 1);
+  const nr = cv.rooms[cv.rooms.length - 1]; assert.equal(nr[1], "х"); near(nr[2].reduce((a, r) => a + (r[2] - r[0]) * (r[3] - r[1]), 0), (sr[2] - sr[0]) * (sr[3] - sr[1]), 1e-6, `${cls}: площадь обведённой комнаты`);
+  assert.ok(cv.walls.some((w) => w[4] === "W4"), `${cls}: у обведённой комнаты есть дверь`);
+  const sn = LA.snapRect(t, [R[0] + 0.1, R[1] + 0.12, R[0] + 1.03, R[1] + 1.01]); assert.ok(eq(sn[0], R[0]) && eq(sn[1], R[1]) && eq(sn[2], R[0] + 1.05) && eq(sn[3], R[1] + 1), `${cls}: прилипание обводки ${sn}`);
+  assert.throws(() => LA.carve(t, [cx - 0.1, cy - 0.1, cx + 0.1, cy + 0.1], "х"), /0,5 × 0,5/);
+  const ps = LA.pieces(t); assert.ok(ps.length > 0 && ps.every((x) => x.b - x.a > 0.005), `${cls}: участки стен`);
+  const pc = ps.find((x) => x.t === "W2" && x.b - x.a >= LA.DOOR + 0.1 && x.r1 !== x.r2);
+  if (pc) {
+    const op = ok(LA.setPieces(t, [pc], ""), "проём вместо стены"), m = (pc.a + pc.b) / 2;
+    assert.ok(LA.pieces(op).some((x) => x.o === pc.o && eq(x.c, pc.c) && x.a <= m && x.b >= m && x.t === ""), `${cls}: участок без стены`);
+    const w3 = ok(LA.setPieces(op, [pc], "W3"), "другой тип стены"); assert.ok(LA.pieces(w3).some((x) => x.o === pc.o && eq(x.c, pc.c) && x.a <= m && x.b >= m && x.t === "W3"));
+    const dd = ok(LA.doorIn(w3, { ...pc, t: "W3" }, m), "дверь в участке"); assert.ok(dd.walls.some((w) => w[4] === "W4" && LA.wseg(w).o === pc.o && eq(LA.wseg(w).c, pc.c) && eq(LA.wseg(w).b - LA.wseg(w).a, LA.DOOR)), `${cls}: дверь ${LA.DOOR} м`);
+    const r = eng.calc({ cls, plan: dd }); assert.ok(r.rec.opt && !/undefined|NaN/.test(UI.render(r, {})), `${cls}: расчёт после правки стен`);
+  }
+}
+
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
 const ids = Object.keys(GL.TERMS), grouped = GL.GROUPS.flatMap(([, g]) => g);
 assert.deepEqual([...grouped].sort(), [...ids].sort(), "термины и группы раздела «Термины и обозначения»");
