@@ -82,9 +82,14 @@ html.kq-lock,html.kq-lock body{overflow:hidden}
 .kq-zoom{position:absolute;right:.4rem;bottom:.4rem;display:flex;flex-direction:column;gap:.25rem}
 .kq-zoom .kq-b{width:2rem;height:2rem;padding:0;justify-content:center;font-size:1.15em;box-shadow:0 1px 3px rgba(0,0,0,.2)}
 .kq-side{flex:1 1 auto;min-height:0;overflow:auto;padding:.5rem .8rem 1.2rem;border-top:1px solid var(--md-default-fg-color--lightest);-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-@media screen and (max-width:59.99em){
-  .kq-hint{position:static;order:2;max-width:none;padding:.2rem .6rem;border-radius:0;background:var(--md-default-bg-color);color:var(--md-default-fg-color--light);border-top:1px solid var(--md-default-fg-color--lightest)}
-  .kq-zoom{top:.4rem;bottom:auto}
+@media screen and (max-width:59.99em){   /* план сверху; под ним строка: подсказка и кнопки масштаба — ничего не закрывает план */
+  .kq-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(0,1fr) auto}
+  .kq-cv{grid-column:1/-1;grid-row:1}
+  .kq-hint,.kq-zoom{grid-row:2;position:static;border-top:1px solid var(--md-default-fg-color--lightest);background:var(--md-default-bg-color)}
+  .kq-hint{grid-column:1;display:flex;align-items:center;max-width:none;padding:.2rem .6rem;border-radius:0;color:var(--md-default-fg-color--light);font-size:.8em}
+  .kq-hint:empty{display:flex}
+  .kq-zoom{grid-column:2;flex-direction:row;padding:.2rem .4rem}
+  .kq-zoom .kq-b{box-shadow:none}
 }
 @media screen and (min-width:60em){
   .kq-main{flex-direction:row}
@@ -148,6 +153,9 @@ div.kq-warn{margin:.3rem 0 .5rem;padding:.3rem .6rem;border-left:.2rem solid #ef
 .kq-mini .nc-lay-mini{height:5rem;padding:.15rem;border-radius:4px;background:#fff}
 .kq-mini small{color:var(--md-default-fg-color--light)}
 .kq-mini .kq-badge{color:var(--md-accent-bg-color)}
+.kq-badge.kq-pc{background:var(--md-default-fg-color--lightest);color:var(--md-default-fg-color)}
+.kq input[type=range]{width:9rem;accent-color:var(--md-accent-fg-color)}
+.kq-imgsz{padding:.3rem .55rem;border-radius:4px;background:var(--md-default-fg-color--lightest)}
 
 /* узкий экран и касание */
 @media screen and (max-width:40em){
