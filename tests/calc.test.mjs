@@ -7,6 +7,7 @@ await import("../docs/assets/js/plan.js");
 await import("../docs/assets/js/layout.js");
 await import("../docs/assets/js/layout-ui.js");   // без DOM ничего не делает — проверка синтаксиса
 await import("../docs/assets/js/layout-img.js");
+await import("../docs/assets/js/layout-net.js");
 await import("../docs/assets/js/calc.js");
 const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary, LA = globalThis.NetLayout;
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
@@ -238,6 +239,38 @@ for (const cls of Object.keys(NE.PLAN_OF)) {
   nearP(at(sc, 900, 650), [sc.W, sc.H], 1e-3, "новая площадь A2: подложка"); nearP(at(st, 900, 650), [st.W, st.H], 1e-6, "другая ширина: подложка");
   const cv = LA.carve(bp, [1, 1, 3.5, 3], "ж"); assert.deepEqual(cv.bg, bp.bg, "обводка не трогает подложку");
   assert.deepEqual(LA.check(cv).err, []); assert.ok(LA.same(LA.normalize(structuredClone(cv)), cv));
+}
+
+// 13. Предпросмотр сигнала в конструкторе (engine.js: preview, why; вкладка «Роутер» — layout-net.js): та же карта, что в расчёте,
+// с точностью до ЭИИМ узла; разбор точки сходится с картой; расчёт И4 не меняется (31 пример — engine.test.mjs)
+{
+  let n = 0;
+  for (const c of cases) {
+    const r0 = eng.calc(structuredClone(c.input)); if (!r0.sh6 || !r0.map) continue;
+    const pl = LA.fromTemplate(PLD, r0.sh2.cls, r0.sh2.area), r1 = eng.calc({ ...structuredClone(c.input), plan: pl });
+    const Q = { plan: pl, cls: r0.sh2.cls, constr: c.input.constr, L_W1: c.input.L_W1 }, v = eng.preview(Q, r1.sh6.aps);
+    assert.equal(v.pts.length, r1.map.pts.length, `${c.id}: предпросмотр — те же точки сетки`);
+    const dP = v.pts.map((p, j) => { near(Math.hypot(p[0] - r1.map.pts[j][0], p[1] - r1.map.pts[j][1]), 0, 2e-3, `${c.id}: точка ${j}`); return p[2] - r1.map.pts[j][2]; });
+    near(Math.max(...dP) - Math.min(...dP), 0, 0.15, `${c.id}: предпросмотр отличается от карты расчёта только ЭИИМ`);
+    assert.ok(v.K >= 0 && v.K <= 100 && v.Kliv >= 0 && v.Kliv <= 100 && v.rooms.length === r1.sh12.points.length, `${c.id}: доли и комнаты`);
+    if (++n >= 6) break;
+  }
+  assert.ok(n >= 3, "предпросмотр проверен на типовых планах");
+  const pl = LA.fromTemplate(PLD, "К3", 62), Q = { plan: pl, cls: "К3" }, ap = pl.pos.center, one = eng.preview(Q, [ap]);
+  assert.equal(one.E, NE.EIRP_DEF["5"], "ЭИИМ предпросмотра по умолчанию — 23 дБм");
+  one.pts.forEach(([x, y, P]) => { const w = eng.why(one.g, ap, [x, y]); near(w.P, P, 0.1, `разбор точки ${x}, ${y} — как на карте`);
+    near(w.E - w.fspl - w.walls.reduce((s, z) => s + z.L, 0), w.P, 1e-9, "разбор: ЭИИМ − расстояние − стены"); });
+  const w0 = eng.why(one.g, ap, [ap[0] + 0.3, ap[1]]);
+  assert.deepEqual(w0.walls, [], "рядом с узлом стен на пути нет"); near(w0.P, 23 - NE.fspl(1, 5500), 1e-9, "ближе 1 м — как на 1 м (4.2)");
+  const far = one.pts.reduce((a, b) => (b[2] < a[2] ? b : a)), wf = eng.why(one.g, ap, [far[0], far[1]]);
+  assert.ok(wf.walls.length > 0 && wf.walls.every((z) => z.L > 0 && one.g.WT[z.t]), "до самой слабой точки — стены с потерями из таблицы");
+  const two = eng.preview(Q, [ap, pl.pos.sat[0]]);
+  two.pts.forEach((p, j) => assert.ok(p[2] >= one.pts[j][2] - 1e-9, "второй узел не ослабляет сигнал"));
+  assert.ok(two.K >= one.K, "со спутником покрытие не меньше");
+  const kk = eng.preview({ ...Q, constr: "К" }, [ap]), kp = eng.preview({ ...Q, constr: "П" }, [ap]), kw = eng.preview({ ...Q, L_W1: 30 }, [ap]);
+  assert.ok(kk.pts.some((p, j) => Math.abs(p[2] - kp.pts[j][2]) > 0.5), "тип дома меняет потери несущих стен");
+  assert.ok(kw.pts.some((p, j) => p[2] < one.pts[j][2] - 1), "замер B1 учитывается в предпросмотре");
+  assert.throws(() => eng.preview(Q, []), /нет узлов/);
 }
 
 // 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
