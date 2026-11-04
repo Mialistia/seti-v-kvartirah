@@ -20,6 +20,8 @@ jobs:
         run: |
           node --check docs/assets/js/engine.js
           node --check docs/assets/js/calc.js
+          node --check docs/assets/js/glossary.js
+          node --check docs/assets/js/tables.js
           node tests/engine.test.mjs
           node tests/calc.test.mjs
           node tests/equipment.test.mjs
