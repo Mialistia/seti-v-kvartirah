@@ -6,7 +6,7 @@
 // Совпадение с эталоном на Python — 31 контрольный пример (tests/fixtures/cases_i4_base.json, cases_i4_spec.json; tests/engine.test.mjs).
 (function (root) {
   "use strict";
-  const VERSION = "engine_i4 1.1 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора), расчёт не изменился
+  const VERSION = "engine_i4 1.2 (04.11.2026)";   // 1.1: тип устройства «ПК» (форма калькулятора); 1.2: варианты К Телеком «Эконом / Оптимальный / Премиум» (R.kt), расчёт И4 не изменился
   const REF_VERSION = "engine_i4 1.0 (04.11.2026)";   // версия эталона на Python (tests/fixtures): 31 пример И4
   // ---------------------------------------------------------------- константы (источники — отчёт И4, табл. 2)
   const BANDS = { "2,4": 2437.0, "5": 5500.0, "6": 6200.0 };      // центральные частоты расчёта, МГц
@@ -585,7 +585,7 @@
           Pz: pyRound(o.Pz, 1), Pz_room: o.Pz_room, SNRz: pyRound(o.SNRz, 1), TCPz: pyRound(o.TCPz), C: pyRound(o.C), bh: o.bh, rooms: o.rooms,
           margin: { Pz: pyRound(o.Pz - L.Pz, 1), TCP: pyRound(o.TCPz / L.TCP, 2), C: pyRound(o.C / Math.max(q._Beff, 1e-9), 2) },
           price: e.price, buy, eq: cs.eq, capex: pyRound(cs.capex), opex: pyRound(cs.opex), tco: pyRound(cs.tco),
-          rub_m2: pyRound(cs.tco / g.area), rub_mbps: pyRound(cs.tco / o.TCPz, 1), k: c.k.map((x) => pyRound(x, 3)), S: pyRound(c.S, 3),
+          rub_m2: pyRound(cs.tco / g.area), rub_mbps: pyRound(cs.tco / o.TCPz, 1), k: c.k ? c.k.map((x) => pyRound(x, 3)) : null, S: c.S === undefined ? null : pyRound(c.S, 3),
           notes, url: e.url === undefined ? null : e.url };
       }
       const rec = {};
@@ -607,6 +607,7 @@
         const us = cand.filter((c) => c.e.src === "Пользователь");
         if (us.length) rec.user = us.map((c) => card(c, "пользовательское"));
       }
+      let fbSel = null;
       if (!kt.length && q.catalog !== false) {   // в парке нет подходящей модели: ближайший вариант парка без требования к стандарту
         const fb = [];
         for (const e of CAT) {
@@ -621,6 +622,7 @@
             : `модели парка К Телеком не выполняют KPI уровня «${L.name}» в допустимых архитектурах; лучший вариант парка — уровень ${x.level}${x.conditional ? " (условно: Powerline после теста)" : ""}`;
           rec.kt_fallback = { id: e.id, name: e.name, wifi: e.wifi, n: x.n, arch: x.arch, TCPz: pyRound(x.TCPz), Pz: pyRound(x.Pz, 1), level: x.level, kpi_ok: ok,
             conditional: !!x.conditional, why };
+          fbSel = { e, x, why, ok, stdOnly };
         }
       }
       R.rec = rec;
@@ -634,7 +636,43 @@
       }
       R.rank = cand.map((c) => ({ id: c.e.id, name: c.e.name, src: c.e.src, n: c.o.n, arch: c.o.arch, TCPz: pyRound(c.o.TCPz), Pz: pyRound(c.o.Pz, 1),
         tco: pyRound(c.o.cost.tco), S: pyRound(c.S, 3), k: c.k.map((x) => pyRound(x, 3)) }));
+      // Ш9 для таблицы «Подобранное оборудование»: только парк К Телеком, по порядку Эконом → Оптимальный → Премиум.
+      // Эконом — наименьшая TCO (при равной — больший S), Оптимальный — наибольший S (как rec.opt), Премиум — наибольшие TCP_z, P_z, k1, S.
+      // Совпадающие варианты — одна строка с несколькими метками. Если в парке нет подходящей модели — ближайший вариант парка (условно).
+      // ex — 2–3 примера с рынка из ранжирования для кнопки «Аналоги»; req — параметры подбора для аналогов.
+      function ktVariants() {
+        const pos = new Map(cand.map((c, i) => [c, i + 1])), mk = cand.filter((c) => c.e.src === "Рынок");
+        const brief = (c) => ({ ...R.rank[pos.get(c) - 1], i: pos.get(c) });
+        const BY = { eco: (c) => [pyRound(c.o.cost.tco), -c.S], opt: (c) => [-pyRound(c.S, 6), pyRound(c.o.cost.tco)],
+          prem: (c) => [-pyRound(c.o.TCPz), -pyRound(c.o.Pz, 1), -c.k[0], -c.S], fb: (c) => [-pyRound(c.S, 6), pyRound(c.o.cost.tco)] };
+        const ex = (role, m) => mk.slice().sort((a, b) => cmpKey(BY[role](a), BY[role](b))).slice(0, m).map(brief);
+        const meshOf = (e) => (isNone(e.mesh) || ["нет", "не подтверждён", "не указан"].includes(e.mesh) ? null : e.mesh);
+        const row = (c, roles, crd) => ({ roles, card: crd || card(c, roles.join(" · ")), type: c.e.type, mesh: meshOf(c.e),
+          ex: Object.fromEntries(roles.map((r) => [r, ex(r, roles.length > 1 ? 2 : 3)])) });
+        const out = { rows: [], best: null, fb: false, why: null,
+          req: { level: lv, name: L.name, std: L.std, need6: !!q.need6, wan: Math.max(q.tariff, L.wan), tariff: q.tariff, dev: pyRound(1.25 * q._N, 2),
+            iptv: !!q.iptv, vpn: !!q.vpn, K: L.K, kkey: L.kkey, Pz: L.Pz, SNR: L.SNR, TCP: L.TCP, Beff: pyRound(q._Beff, 1), cap: SEG_CAP[lv], guest: lv === 3 } };
+        if (kt.length) {
+          const pick = [["eco", minBy(kt, BY.eco)], ["opt", kt[0]], ["prem", minBy(kt, BY.prem)]], grp = new Map();
+          for (const [r, c] of pick) { if (!grp.has(c)) grp.set(c, []); grp.get(c).push(r); }
+          for (const [c, roles] of grp) out.rows.push(row(c, roles));
+          out.best = out.rows.find((x) => x.roles.includes("opt")).card;
+        } else if (fbSel) {
+          const { e, x } = fbSel, o = x.cost ? x : { ...x, buy: x.kits, cost: tco(x.kits * e.price, x.L, x.cable.filter((v) => v).length, x.n, e.pw) };
+          const crd = card({ e, o }, "условно");
+          out.rows.push(row({ e, o }, ["fb"], crd));
+          let why = fbSel.why;   // KPI выполнены, но вариант не прошёл по ёмкости или бюджету — назвать настоящую причину
+          if (fbSel.ok && !fbSel.stdOnly) {
+            const rs = (capacityOk(o, q) ? [] : [`ёмкость C ${fmt(o.C, 0)} < B_эфф ${fmt(q._Beff, 0)} Мбит/с`])
+              .concat(q.budget && o.cost.capex > q.budget ? [`CAPEX ${fmt(o.cost.capex, 0)} руб. больше бюджета ${fmt(+q.budget, 0)} руб.`] : []);
+            if (rs.length) why = `модели парка К Телеком не проходят подбор: ${rs.join("; ")}; ближайший вариант парка выполняет KPI уровня «${L.name}»`;
+          }
+          Object.assign(out, { best: crd, fb: true, why });
+        }
+        return out;
+      }
       R.excluded = excl;
+      R.kt = ktVariants();
       R.counts = { total: items.length, passed: cand.length, passed_kt: kt.length, excluded: excl.length };
       // Ш6–Ш8, Ш12 для рекомендованного варианта
       if (rec.opt) {
@@ -642,6 +680,11 @@
         R.sh6 = { aps: o.aps, roles: ["корневой узел"].concat(Array.from({ length: o.n - 1 }, (_, i) => "спутник " + (i + 1))), cable: o.cable };
         R.sh7 = freqPlan(o, lv); R.sh8 = cableJournal(g, o, q); R.sh12 = passport(g, o, lv);
         R.map = coverage(g, o.aps, nodeParams(optCand.e, lv, "5").E);
+      }
+      if (R.kt.fb && R.kt.best) {   // в парке нет подходящей модели: план, частоты, кабель и паспорт — для ближайшего варианта парка
+        const o = R.kt.best;
+        R.kt.plan = { sh6: { aps: o.aps, roles: ["корневой узел"].concat(Array.from({ length: o.n - 1 }, (_, i) => "спутник " + (i + 1))), cable: o.cable },
+          sh7: freqPlan(o, lv), sh8: cableJournal(g, o, q), sh12: passport(g, o, lv), map: coverage(g, o.aps, nodeParams(fbSel.e, lv, "5").E) };
       }
       R.geom = { W: pyRound(g.W, 2), H: pyRound(g.H, 2), pos: g.pos, rooms: g.rooms, walls: g.walls, title: g.title };
       return R;
