@@ -4,6 +4,8 @@
 
 Квартира моделируется по типовому плану своего класса (И2), масштабированному по площади. Это прогноз: итог проверяется замерами «до» и «после» (блок H чек-листа, Ш11). Оборудование берётся из базы Notion «Оборудование К Телеком» — парк К Телеком и модели рынка (И3); сайт выгружает её каждый час. Своё оборудование можно добавить в блоке G3: оно рассчитывается наравне с каталогом.
 
+Блок «Планировка» в форме — карточки типовых квартир К1–К5 и «С нуля». «Изменить планировку» открывает редактор: стену можно перетащить мышью или пальцем (на телефоне — сначала коснитесь стены) или сдвинуть кнопками и стрелками клавиатуры с шагом 5 см; помещение — разделить стеной (с дверью или без), объединить с соседним, переименовать, сменить тип; у участка стены — сменить тип (потери — по И2, табл. 4), вставить дверь или удалить его. «С нуля» — прямоугольный контур площадью из A2 с одной комнатой. Места узлов у изменённого типового плана остаются как в И4, кнопка «Расставить узлы по правилам» (и план «с нуля») ставит их по правилам размещения. Площадь своей планировки фиксирована: новое число в A2 пересчитывает план с сохранением пропорций. Расчёт по своей планировке — после «Рассчитать подбор» или «Пересчитать»: пока не пересчитано, над результатом показывается уведомление, что он устарел. Код квартиры — со «*» (К3-Р-П* — изменённый типовой план, К3-*-П — с нуля). Планировка сохраняется в этом браузере, её можно сохранить в файл JSON и загрузить обратно.
+
 В таблице «Подобранное оборудование» — только модели К Телеком, по порядку: «Эконом» — наименьшая стоимость владения за 5 лет, «Оптимальный» — наибольший балл S, рекомендуем, «Премиум» — наибольшая скорость в худшей зоне; если это одна и та же модель, она показывается одной строкой с несколькими метками. Кнопка «Аналоги» под моделью раскрывает параметры подбора и 2–3 примера моделей с рынка из списка «Все подходящие варианты». Если в парке нет модели, выполняющей требования уровня (например, Wi-Fi 7 для премиального), показывается ближайший вариант К Телеком — условно.
 
 Над планом квартиры — переключатель вариантов «Эконом», «Оптимальный», «Премиум» и «Свой выбор». «Свой выбор» — любая модель из списка «Все подходящие варианты» (кнопка «на план» или выпадающий список, в том числе своё оборудование) или новая модель, введённая в блоке G3: после «Добавить в расчёт» она пересчитывается и сразу показывается на плане. Для выбранного варианта заново строятся карта сигнала, узлы и кабель на плане, размещение, частоты, журнал кабеля, паспорт сети и строка стоимости; рекомендация при этом не меняется. Под планом — легенда: шкала сигнала, обозначения узлов и кабеля, а для стен — образец линии, тип стены и потери на 5 ГГц.
@@ -19,7 +21,7 @@
 <div id="nc-gloss" class="gl-sec" markdown="0"><p>Для показа терминов нужен JavaScript.</p></div>
 
 <style>
-.netcalc fieldset{border:1px solid var(--md-default-fg-color--lightest);border-radius:6px;margin:0 0 1rem;padding:.3rem .9rem .6rem}
+.netcalc fieldset{border:1px solid var(--md-default-fg-color--lightest);border-radius:6px;margin:0 0 1rem;padding:.3rem .9rem .6rem;min-width:0}
 .netcalc legend{font-weight:700;padding:0 .3rem}
 .netcalc .nc-row{display:flex;justify-content:space-between;align-items:center;gap:.3rem 1rem;margin:.3rem 0;flex-wrap:wrap}
 .netcalc .nc-row>span{flex:1 1 14rem}
@@ -83,8 +85,45 @@
 .netcalc .nc-wl{flex:none;background:#fff;border:1px solid var(--md-default-fg-color--lightest);border-radius:2px}
 .netcalc .nc-legend i.nc-ln.nc-pl{border-top:3px dotted #6a1b9a}
 @media print{.netcalc .nc-pvs,.netcalc .nc-pvsel,.netcalc .nc-pv-pick,.netcalc .nc-own-r select,.netcalc .nc-pv-go{display:none}}
+.netcalc .nc-lay{margin:.6rem 0 .2rem;padding-top:.4rem;border-top:1px dashed var(--md-default-fg-color--lightest)}
+.netcalc .nc-lay-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;margin:.4rem 0}
+@media screen and (min-width:30em){.netcalc .nc-lay-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.netcalc .nc-lay-card{display:flex;flex-direction:column;gap:.2rem;padding:.35rem;border:1px solid var(--md-default-fg-color--lighter);border-radius:6px;background:var(--md-default-bg-color);color:inherit;font:inherit;font-size:.72rem;line-height:1.3;text-align:left;cursor:pointer}
+.netcalc .nc-lay-card:hover,.netcalc .nc-lay-card:focus-visible{border-color:var(--md-accent-fg-color)}
+.netcalc .nc-lay-card[aria-pressed=true]{border-color:var(--md-accent-fg-color);box-shadow:0 0 0 2px var(--md-accent-fg-color--transparent);background:var(--md-accent-fg-color--transparent)}
+.netcalc .nc-lay-mini{display:block;width:100%;height:4.2rem}
+.netcalc .nc-lay-auto{padding:0 .3em;border-radius:.2rem;background:var(--md-accent-fg-color);color:var(--md-accent-bg-color);font-weight:700}
+.netcalc .nc-lay-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.4rem 0}
+.netcalc .nc-lay-b{padding:.15rem .55rem;border:1px solid var(--md-default-fg-color--lighter);border-radius:4px;background:var(--md-default-bg-color);color:var(--md-typeset-a-color);font:inherit;font-size:.78rem;cursor:pointer}
+.netcalc .nc-lay-b:hover,.netcalc .nc-lay-b:focus-visible{border-color:var(--md-accent-fg-color);color:var(--md-accent-fg-color)}
+.netcalc .nc-lay-b:disabled{opacity:.45;cursor:default}
+.netcalc .nc-lay-b[data-main]{background:var(--md-primary-fg-color);border-color:var(--md-primary-fg-color);color:var(--md-primary-bg-color)}
+.netcalc .nc-lay-ed,.netcalc .nc-lay-new{margin:.5rem 0;padding:.3rem .6rem .5rem;border:1px solid var(--md-default-fg-color--lightest);border-radius:6px}
+.netcalc .nc-lay-box{touch-action:manipulation;-webkit-user-select:none;user-select:none;outline-offset:2px}
+.netcalc .nc-lay-box.nc-lay-drag{touch-action:none}
+.netcalc .nc-lay-svg{display:block;width:100%;max-width:680px;max-height:72vh;height:auto;background:#fff;border:1px solid var(--md-default-fg-color--lightest);border-radius:4px}
+.netcalc .nc-lay-svg text{text-anchor:middle;dominant-baseline:central;font-family:sans-serif;pointer-events:none}
+.netcalc .nc-lay-svg .nc-room{font-weight:600;fill:#212121;paint-order:stroke;stroke:#fff;stroke-width:5px}
+.netcalc .nc-lay-svg .nc-lay-a{font-size:.8em;fill:#455a64;paint-order:stroke;stroke:#fff;stroke-width:4px}
+.netcalc .nc-lay-svg .nc-lay-d{font-size:.8em;fill:#546e7a}
+.netcalc .nc-lay-svg .nc-lay-n{font-size:.62em;font-weight:700;fill:#fff}
+.netcalc .nc-lay-svg .nc-lay-h{font-size:.9em;font-weight:700;fill:#fff}
+.netcalc .nc-lay-svg .nc-lay-on{fill:#ffe0b2}
+.netcalc .nc-lay-svg .nc-lay-pos{pointer-events:none}
+.netcalc .nc-lay-f{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;margin:.3rem 0}
+.netcalc .nc-lay-f label{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+.netcalc .nc-lay input[type=number]{width:6rem}
+.netcalc .nc-lay input[type=text]{width:12rem}
+.netcalc .nc-lay select{width:auto;max-width:100%}
+.netcalc .nc-lay .nc-chk{white-space:normal;margin-left:0}
+.netcalc .nc-lay-warn{color:#e65100}
+.netcalc .nc-lay-stale{padding:.3rem .5rem;border-left:.2rem solid #ef6c00;background:rgba(239,108,0,.08)}
+.netcalc .nc-lay-help{font-size:.8em}
+@media print{.netcalc .nc-lay-ed,.netcalc .nc-lay-new,.netcalc .nc-lay-cards,.netcalc .nc-lay-acts{display:none}}
 </style>
 <script src="../assets/js/engine.js"></script>
 <script src="../assets/js/glossary.js"></script>
 <script src="../assets/js/plan.js"></script>
+<script src="../assets/js/layout.js"></script>
+<script src="../assets/js/layout-ui.js"></script>
 <script src="../assets/js/calc.js"></script>

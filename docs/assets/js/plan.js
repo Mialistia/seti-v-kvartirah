@@ -101,5 +101,5 @@
       (pl ? `<span><i class="nc-ln nc-pl"></i>Powerline${q("pl")}</span>` : "") + `</p>` + wallLegend(R);
   }
 
-  root.NetPlan = { planSvg, legend, wallLegend, rssiColor, crossings, RSSI, WALL, WALL_NAME };
+  root.NetPlan = { planSvg, legend, wallLegend, rssiColor, crossings, RSSI, WALL, WALL_NAME, ROOM_FILL };
 })(typeof window !== "undefined" ? window : globalThis);
