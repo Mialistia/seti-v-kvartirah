@@ -156,6 +156,13 @@ div.kq-warn{margin:.3rem 0 .5rem;padding:.3rem .6rem;border-left:.2rem solid #ef
 .kq-badge.kq-pc{background:var(--md-default-fg-color--lightest);color:var(--md-default-fg-color)}
 .kq input[type=range]{width:9rem;accent-color:var(--md-accent-fg-color)}
 .kq-imgsz{padding:.3rem .55rem;border-radius:4px;background:var(--md-default-fg-color--lightest)}
+/* вкладка «Роутер» (layout-net.js): разбор точки, слабые точки комнат, легенда карты сигнала */
+.kq-why{margin:.5rem 0;padding:.4rem .6rem;border-left:3px solid #ff6d00;border-radius:4px;background:var(--md-default-fg-color--lightest)}
+.kq-why h4{margin-top:.1rem}
+.kq-why ul{margin:.2rem 0 .3rem;padding-left:1.1rem}
+.kq-nlist{display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;margin:.3rem 0}
+.kq-lg{display:inline-flex;align-items:center;gap:.25rem;margin-right:.45rem;white-space:nowrap}
+.kq-lg i{flex:none;width:.8rem;height:.8rem;border-radius:2px}
 
 /* узкий экран и касание */
 @media screen and (max-width:40em){
