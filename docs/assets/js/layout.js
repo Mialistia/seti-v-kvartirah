@@ -358,8 +358,142 @@
     return out.join("");
   }
 
+  // ---------------------------------------------------------------- конструктор: весь план, края комнат, обводка прямоугольником, участки стен
+  function mapPlan(pl0, f, W2, H2) {   // перенос всех точек плана f([x, y]) → [x', y'] (отражение, поворот, растяжение)
+    const pl = clone(pl0), P = (p) => f(p).map(r4);
+    const R = (r) => { const a = P([r[0], r[1]]), b = P([r[2], r[3]]); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]; };
+    pl.W = r4(W2); pl.H = r4(H2);
+    for (const rm of pl.rooms) rm[2] = rm[2].map(R);
+    pl.walls = pl.walls.map((w) => P([w[0], w[1]]).concat(P([w[2], w[3]]), [w[4]]));
+    if (pl.pos) pl.pos = { entry: P(pl.pos.entry), center: P(pl.pos.center), sat: pl.pos.sat.map(P) };
+    pl.door = (pl.door || []).map(P); pl.windows = (pl.windows || []).map((w) => w.map(P));
+    return normalize(pl);
+  }
+  const mirror = (pl, ax) => mapPlan(pl, ax === "x" ? ([x, y]) => [pl.W - x, y] : ([x, y]) => [x, pl.H - y], pl.W, pl.H);   // ax: "x" — слева направо, "y" — сверху вниз
+  const rotate = (pl) => mapPlan(pl, ([x, y]) => [pl.H - y, x], pl.H, pl.W);   // на 90° по часовой стрелке
+  function stretch(pl, W2) {   // другая ширина квартиры при той же площади: длина = площадь / ширина
+    W2 = r4(W2); const H2 = r4(pl.W * pl.H / W2), kx = W2 / pl.W, ky = H2 / pl.H;
+    return finish(mapPlan(pl, ([x, y]) => [x * kx, y * ky], W2, H2));
+  }
+  function setDoor(pl0, side, off) {   // входная дверь на контуре; ввод кабеля — у двери
+    const pl = clone(pl0); pl.door = doorOn(pl.W, pl.H, side, off);
+    if (pl.pos) pl.pos = { ...pl.pos, entry: entryOf(pl) };
+    return finish(pl);
+  }
+  function doorSide(pl) {   // сторона и отступ входной двери: для формы
+    const d = pl.door && pl.door.length === 2 ? pl.door : null;
+    if (!d) return { side: "низ", off: 0.4 };
+    const side = eq(d[0][1], pl.H) && eq(d[1][1], pl.H) ? "низ" : eq(d[0][1], 0) && eq(d[1][1], 0) ? "верх" : eq(d[0][0], 0) ? "лево" : "право";
+    return { side, off: r4(side === "низ" || side === "верх" ? Math.min(d[0][0], d[1][0]) : Math.min(d[0][1], d[1][1])) };
+  }
+  function roomEdges(pl, ri) {   // внутренние края помещения: участки, за которыми другое помещение (контур квартиры не двигается); s — наружу: +1 вправо/вниз
+    const out = [], rs = pl.rooms[ri] ? pl.rooms[ri][2] : [];
+    for (const r of rs) for (const [o, c, a, b, s] of [["v", r[0], r[1], r[3], -1], ["v", r[2], r[1], r[3], 1], ["h", r[1], r[0], r[2], -1], ["h", r[3], r[0], r[2], 1]]) {
+      if (eq(c, 0) || eq(c, o === "v" ? pl.W : pl.H)) continue;
+      const own = rs.filter((x) => x !== r).map((x) => { const [c0, c1, a0, a1] = o === "v" ? [x[0], x[2], x[1], x[3]] : [x[1], x[3], x[0], x[2]]; return (s > 0 ? eq(c0, c) : eq(c1, c)) ? [a0, a1] : null; }).filter(Boolean);
+      for (const [lo, hi] of subtract([a, b], own)) if (hi - lo > 0.05) out.push({ o, c, lo: r4(lo), hi: r4(hi), s });
+    }
+    return out;
+  }
+  function moveEdge(pl, e, c2) {   // край помещения: двигается только этот участок, соседние помещения подстраиваются
+    const [mn, mx] = range(pl, e), v = r4(Math.min(mx, Math.max(mn, Math.round(c2 / SNAP) * SNAP)));
+    return eq(v, e.c) ? clone(pl) : moveLine(pl, e, v);
+  }
+  function roomSize(pl, ri, dir, v) {   // ширина (dir "v") или длина ("h") прямоугольного помещения: двигается правый (нижний) край, у контура — левый (верхний)
+    const rs = pl.rooms[ri][2]; if (rs.length !== 1) throw new Error("размер числом — только у прямоугольной комнаты; тяните кружки на плане");
+    const r = rs[0], V = dir === "v", [a0, a1, b0, b1] = V ? [r[0], r[2], r[1], r[3]] : [r[1], r[3], r[0], r[2]], L = V ? pl.W : pl.H;
+    const far = !eq(a1, L) ? { o: dir, c: a1, lo: b0, hi: b1 } : !eq(a0, 0) ? { o: dir, c: a0, lo: b0, hi: b1 } : null;
+    if (!far) throw new Error(`комната во всю ${V ? "ширину" : "длину"} квартиры — меняйте размеры квартиры`);
+    return moveEdge(pl, far, far.c === a1 ? a0 + v : a1 - v);
+  }
+  function lineSet(pl, o) {   // прямые плана по направлению: контур и края помещений
+    const s = new Set([0, o === "v" ? pl.W : pl.H]);
+    for (const [, , rs] of pl.rooms) for (const r of rs) { if (o === "v") { s.add(r[0]); s.add(r[2]); } else { s.add(r[1]); s.add(r[3]); } }
+    return [...s];
+  }
+  function snapRect(pl, r) {   // прямоугольник обводки: шаг 5 см, ближе MIN + 5 см к краю помещения или контуру — по краю (без узких полосок)
+    const sn = (v, o) => { let b = null; for (const c of lineSet(pl, o)) if (Math.abs(c - v) < MIN + SNAP - EPS && (b === null || Math.abs(c - v) < Math.abs(b - v))) b = c; return b !== null ? b : Math.round(v / SNAP) * SNAP; };
+    const x0 = Math.min(r[0], r[2]), x1 = Math.max(r[0], r[2]), y0 = Math.min(r[1], r[3]), y1 = Math.max(r[1], r[3]);
+    return [Math.max(0, sn(x0, "v")), Math.max(0, sn(y0, "h")), Math.min(pl.W, sn(x1, "v")), Math.min(pl.H, sn(y1, "h"))].map(r4);
+  }
+  function rdiff(r, c) {   // прямоугольник r без прямоугольника c — до четырёх частей
+    if (c[0] >= r[2] - EPS || c[2] <= r[0] + EPS || c[1] >= r[3] - EPS || c[3] <= r[1] + EPS) return [r];
+    const out = [], y0 = Math.max(r[1], c[1]), y1 = Math.min(r[3], c[3]);
+    if (c[1] > r[1] + EPS) out.push([r[0], r[1], r[2], c[1]]);
+    if (c[3] < r[3] - EPS) out.push([r[0], c[3], r[2], r[3]]);
+    if (c[0] > r[0] + EPS) out.push([r[0], y0, c[0], y1]);
+    if (c[2] < r[2] - EPS) out.push([c[2], y0, r[2], y1]);
+    return out;
+  }
+  function carve(pl0, r0, type = "ж", wt = "W2", door = true) {   // новая комната прямоугольником: забирает площадь у тех, кого накрыла; по краям — стены wt ("" — без стен)
+    const pl = clone(pl0), r = snapRect(pl, r0);
+    if (r[2] - r[0] < 0.5 - EPS || r[3] - r[1] < 0.5 - EPS) throw new Error("комната меньше 0,5 × 0,5 м — обведите крупнее");
+    const name = uniq(pl, RNAME[type] || "Комната");
+    for (const rm of pl.rooms) rm[2] = rm[2].flatMap((x) => rdiff(x, r));
+    pl.walls = pl.walls.flatMap((w) => {   // стены внутри прямоугольника убираются
+      const s = wseg(w); if (!s) return [];
+      const inner = s.o === "v" ? s.c > r[0] + EPS && s.c < r[2] - EPS : s.c > r[1] + EPS && s.c < r[3] - EPS;
+      return inner ? subtract([s.a, s.b], [s.o === "v" ? [r[1], r[3]] : [r[0], r[2]]]).filter(([x, y]) => y - x > 0.005).map(([x, y]) => mkW(s.o, s.c, x, y, w[4])) : [w];
+    });
+    const add = [];
+    if (wt) for (const [o, c, a, b] of [["h", r[1], r[0], r[2]], ["h", r[3], r[0], r[2]], ["v", r[0], r[1], r[3]], ["v", r[2], r[1], r[3]]]) {
+      if (eq(c, 0) || eq(c, o === "v" ? pl.W : pl.H)) continue;
+      const has = pl.walls.map(wseg).filter((s) => onLine(s, o, c)).map((s) => [s.a, s.b]);
+      for (const [x, y] of subtract([a, b], has)) if (y - x > 0.01) add.push({ o, c, a: x, b: y });
+    }
+    pl.rooms.push([name, type, [r]]);
+    pl.walls.push(...add.map((s) => mkW(s.o, s.c, s.a, s.b, wt)));
+    let out = normalize(pl);
+    if (door && wt && wt !== "W4") {   // дверь — в стене к коридору, иначе в самой длинной новой стене
+      const nb = (s) => { const m = s.o === "v" ? [s.c + (eq(s.c, r[0]) ? -0.05 : 0.05), (s.a + s.b) / 2] : [(s.a + s.b) / 2, s.c + (eq(s.c, r[1]) ? -0.05 : 0.05)], i = roomAt(out, m); return i >= 0 ? out.rooms[i][1] : ""; };
+      const ok = add.filter((s) => s.b - s.a >= DOOR + 0.1).sort((x, y) => (nb(y) === "п") - (nb(x) === "п") || (y.b - y.a) - (x.b - x.a));
+      if (ok.length) out = doorIn(out, { ...ok[0] }, (ok[0].a + ok[0].b) / 2);
+    }
+    return finish(out);
+  }
+  function pieces(pl) {   // участки стен и границ помещений для вкладки «Стены»: { o, c, a, b, t, r1, r2 }; t — тип стены, "" — без стены
+    const out = [], WS = pl.walls.map((w) => [wseg(w), w[4]]).filter(([s]) => s), B = bounds(pl);
+    const add = (o, c, a, b, r1, r2) => {
+      const on = WS.filter(([s]) => onLine(s, o, c) && s.b > a + EPS && s.a < b - EPS), P = [a, b];
+      for (const [s] of on) for (const v of [s.a, s.b]) if (v > a + EPS && v < b - EPS) P.push(v);
+      const ps = [...new Set(P.map(r4))].sort((x, y) => x - y);
+      for (let i = 0; i + 1 < ps.length; i++) {
+        const m = (ps[i] + ps[i + 1]) / 2, w = on.find(([s]) => s.a <= m + EPS && s.b >= m - EPS);
+        if (ps[i + 1] - ps[i] > 0.005) out.push({ o, c, a: ps[i], b: ps[i + 1], t: w ? w[1] : "", r1, r2 });
+      }
+    };
+    for (const bd of B) add(bd.o, bd.c, r4(bd.a), r4(bd.b), bd.r1, bd.r2);
+    for (const [s, t] of WS) {   // стены внутри одного помещения (не на границе)
+      if (eq(s.c, 0) || eq(s.c, s.o === "v" ? pl.W : pl.H)) continue;
+      for (const [x, y] of subtract([s.a, s.b], B.filter((b) => onLine(b, s.o, s.c)).map((b) => [b.a, b.b]))) if (y - x > 0.01) {
+        const ri = roomAt(pl, s.o === "v" ? [s.c, (x + y) / 2] : [(x + y) / 2, s.c]);
+        out.push({ o: s.o, c: s.c, a: r4(x), b: r4(y), t, r1: ri, r2: ri });
+      }
+    }
+    return out;
+  }
+  function setPieces(pl0, list, t) {   // тип стены для участков; t = "" — убрать стену (проём, арка, граница зон)
+    const pl = clone(pl0);
+    for (const p of list) {
+      pl.walls = pl.walls.flatMap((w) => { const s = wseg(w); return onLine(s, p.o, p.c) ? subtract([s.a, s.b], [[p.a, p.b]]).filter(([x, y]) => y - x > 0.005).map(([x, y]) => mkW(s.o, s.c, x, y, w[4])) : [w]; });
+      if (t) pl.walls.push(mkW(p.o, p.c, p.a, p.b, t));
+    }
+    return finish(normalize(pl));
+  }
+  function doorIn(pl, p, at) {   // дверь DOOR м в участке стены p около точки at
+    if (p.b - p.a < DOOR + 0.1 - EPS) throw new Error(`участок короче ${fm(DOOR + 0.1)} м — дверь не помещается`);
+    const d0 = r4(Math.min(p.b - DOOR, Math.max(p.a, Math.round(((at ?? (p.a + p.b) / 2) - DOOR / 2) / SNAP) * SNAP)));
+    return setPieces(pl, [{ ...p, a: d0, b: r4(d0 + DOOR) }], "W4");
+  }
+  function badRooms(pl) {   // помещения меньше клетки расчётной сетки — для подсветки на плане
+    const bad = new Set();
+    pl.rooms.forEach(([, , rs], i) => { if (!rs.some((r) => r[0] + STEP / 2 < r[2] && r[1] + STEP / 2 < r[3])) bad.add(i); });
+    return bad;
+  }
+
   const api = { fromTemplate, blank, rescale, same, wseg, bounds, openB, junctions, extentAt, range, moveLine, normalize, splitRoom, neighbors, mergeRooms,
     setRoom, setWall, addWall, insertDoor, autoPos, roomAt, check, draw, entryOf, nsatOf, finish, RT, WTYPES, MIN, SNAP, DOOR,
+    mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, pieces, setPieces, doorIn, badRooms, RNAME, WALL, WNAME, RF, STEP,
     init: (PLD) => { PL_DATA = PLD; },
     _: { EPS, eq, r4, clone, esc, fm, q, wname, area, big, mkW, onLine, segDist } };   // для layout-ui.js
   root.NetLayout = api;
