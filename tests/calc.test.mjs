@@ -7,6 +7,7 @@ await import("../docs/assets/js/plan.js");
 await import("../docs/assets/js/layout.js");
 await import("../docs/assets/js/layout-ui.js");   // без DOM ничего не делает — проверка синтаксиса
 await import("../docs/assets/js/layout-img.js");
+await import("../docs/assets/js/layout-tools.js");
 await import("../docs/assets/js/layout-net.js");
 await import("../docs/assets/js/calc.js");
 const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary, LA = globalThis.NetLayout;
@@ -273,7 +274,37 @@ for (const cls of Object.keys(NE.PLAN_OF)) {
   assert.throws(() => eng.preview(Q, []), /нет узлов/);
 }
 
-// 9. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
+// 9. Новые инструменты конструктора: формы комнат, окна и экспортный SVG
+for (const shape of ["rect", "square", "l1", "l2"]) {
+  const pl = LA.blank(PLD, "К3", 60, 10, "низ", 0.4), before = pl.rooms.length;
+  const boxes = LA.shapeRects([2, 1, 6, 5], shape), a = boxes.reduce((s, r) => s + (r[2] - r[0]) * (r[3] - r[1]), 0);
+  if (shape === "square") near(a, 16, 1e-9, "квадратная комната: площадь");
+  if (shape === "l1" || shape === "l2") near(a, 12, 1e-9, "L-образная комната: площадь");
+  const np = LA.carveShape(pl, [2, 1, 6, 5], "ж", "W2", true, shape);
+  assert.equal(np.rooms.length, before + 1, `${shape}: одна новая комната`);
+  assert.deepEqual(LA.check(np).err, [], `${shape}: план проходит проверку`);
+  near(sumA(np), np.W * np.H, 1e-6, `${shape}: площадь сохранена`);
+  assert.ok(eng.calc({ cls: "К3", plan: np }).rec.opt, `${shape}: расчёт И4 работает`);
+}
+{
+  const pl = LA.blank(PLD, "К3", 60, 10, "низ", 0.4), seg = LA.outerAt(pl, [3, 0]), nw = pl.windows.length;
+  assert.ok(seg && seg.outer && seg.o === "h" && seg.c === 0, "наружная стена найдена по точке");
+  let np = LA.addWindow(pl, seg, 1.2);
+  assert.equal(np.windows.length, nw + 1); near(LA.winSeg(np.windows[nw]).b - LA.winSeg(np.windows[nw]).a, 1.2, 1e-9, "ширина окна");
+  assert.throws(() => LA.addWindow(np, seg, 1.2), /уже есть/, "окна не накладываются");
+  np = LA.moveWindow(np, nw, 5); near((LA.winSeg(np.windows[nw]).a + LA.winSeg(np.windows[nw]).b) / 2, 5, 1e-9, "окно перемещено");
+  np = LA.resizeWindow(np, nw, 1.6); near(LA.winSeg(np.windows[nw]).b - LA.winSeg(np.windows[nw]).a, 1.6, 1e-9, "ширина окна изменена");
+  const ws = LA.winSeg(np.windows[nw]), hit = LA.windowAt(np, [(ws.a + ws.b) / 2, 0]); assert.ok(hit && hit.wi === nw, "окно выбирается на плане");
+  const svg = LA.draw(np); assert.ok(svg.includes("#29b6f6") && svg.includes("#0288d9"), "окно показано двойной линией");
+  assert.deepEqual(LA.check(np).err, [], "окна не ломают план");
+  const tpl = LA.fromTemplate(PLD, "К3", null), side = LA.outerAt(tpl, [tpl.W, 1.5]);
+  const withWindow = LA.addWindow(tpl, side, 1.2);
+  assert.equal(withWindow.windows.length, tpl.windows.length + 1, "окно добавляется в типовой план");
+  assert.equal(LA.same(tpl, withWindow), false, "изменение окна делает планировку своей");
+  assert.deepEqual(LA.check(withWindow).err, [], "типовой план с новым окном проходит проверку");
+}
+
+// 10. Словарь терминов: у каждого термина есть пояснение и источник, каждый — ровно в одной группе раздела
 const ids = Object.keys(GL.TERMS), grouped = GL.GROUPS.flatMap(([, g]) => g);
 assert.deepEqual([...grouped].sort(), [...ids].sort(), "термины и группы раздела «Термины и обозначения»");
 for (const id of ids) {
