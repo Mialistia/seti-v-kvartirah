@@ -48,5 +48,28 @@ jobs:
       - run: pip install mkdocs-material && mkdocs build
       - uses: actions/upload-pages-artifact@v4
         with: {path: site}
+      - name: Дождаться доступности артефакта Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 12); do
+            count=0
+            if response=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100"); then
+              count=$(jq '[.artifacts[] | select(.name == "github-pages")] | length' <<< "$response")
+            fi
+            if [ "$count" -eq 1 ]; then
+              echo "Артефакт github-pages доступен"
+              exit 0
+            fi
+            if [ "$count" -gt 1 ]; then
+              echo "Ошибка: несколько артефактов github-pages в одном запуске" >&2
+              exit 1
+            fi
+            echo "Артефакт ещё не виден API (попытка $attempt/12)"
+            sleep 5
+          done
+          echo "Ошибка: артефакт github-pages не появился в API" >&2
+          exit 1
       - id: deploy
         uses: actions/deploy-pages@v4
