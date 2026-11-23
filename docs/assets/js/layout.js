@@ -52,17 +52,19 @@
     for (const rm of pl.rooms) rm[2] = rm[2].map((r) => r.map(sc));
     pl.walls = pl.walls.map((w) => w.slice(0, 4).map(sc).concat(w[4]));
     pl.pos = { entry: pt(pl.pos.entry), center: pt(pl.pos.center), sat: pl.pos.sat.map(pt) };
-    pl.door = (pl.door || []).map(pt); pl.windows = (pl.windows || []).map((w) => w.map(pt));
+    pl.door = (pl.door || []).map(pt); pl.windows = (pl.windows || []).map((w) => winPoints(w).map(pt));
     if (pl.bg && pl.bg.m) pl.bg = { ...pl.bg, m: pl.bg.m.map((v) => v * k) };
     return pl;
   }
-  const same = (a, b) => !!a && !!b && JSON.stringify([a.rooms, a.walls, a.pos, a.W, a.H]) === JSON.stringify([b.rooms, b.walls, b.pos, b.W, b.H]);
+  const same = (a, b) => !!a && !!b && JSON.stringify([a.rooms, a.walls, a.pos, a.windows, a.door, a.W, a.H]) === JSON.stringify([b.rooms, b.walls, b.pos, b.windows, b.door, b.W, b.H]);
 
   // ---------------------------------------------------------------- отрезки, границы помещений, прямые
   // отрезок на прямой: o — "v" (x = c) или "h" (y = c), [a, b] — вдоль прямой
   const wseg = (w) => (eq(w[0], w[2]) && !eq(w[1], w[3]) ? { o: "v", c: w[0], a: Math.min(w[1], w[3]), b: Math.max(w[1], w[3]) }
     : eq(w[1], w[3]) && !eq(w[0], w[2]) ? { o: "h", c: w[1], a: Math.min(w[0], w[2]), b: Math.max(w[0], w[2]) } : null);
   const mkW = (o, c, a, b, t) => (o === "v" ? [c, a, c, b, t] : [a, c, b, c, t]);
+  const winPoints = (w) => Array.isArray(w[0]) ? w : [w.slice(0, 2), w.slice(2, 4)];
+  const winSeg = (w) => { const [a, b] = winPoints(w); return wseg([a[0], a[1], b[0], b[1], ""]); };
   function edges(pl) {   // рёбра прямоугольников помещений; s = 1 — прямоугольник за прямой (больше c), −1 — перед ней
     const out = [];
     pl.rooms.forEach(([, , rs], ri) => rs.forEach((r) => out.push({ o: "v", c: r[0], a: r[1], b: r[3], s: 1, ri }, { o: "v", c: r[2], a: r[1], b: r[3], s: -1, ri },
@@ -327,12 +329,21 @@
       (mini ? ` aria-hidden="true" focusable="false">` : ` role="img" style="font-size:${fs}px"><title>${esc(pl.title)}: ${fm(W)} × ${fm(H)} м, ${fm(W * H, 1)} м²</title>`));
     pl.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${RF[t] || "#f5f5f5"}"${o.room === i ? ' class="nc-lay-on"' : ""}/>`); });
     out.push(`<rect x="0" y="0" width="${cm(W)}" height="${cm(H)}" fill="none" stroke="#37474f" stroke-width="${mini ? 10 : 6}"/>`);
-    for (const w of pl.windows || []) out.push(`<line x1="${cm(w[0][0])}" y1="${cm(w[0][1])}" x2="${cm(w[1][0])}" y2="${cm(w[1][1])}" stroke="#81d4fa" stroke-width="${mini ? 14 : 10}"/>`);
+    for (const w of pl.windows || []) {
+      const [a, b] = winPoints(w);
+      out.push(`<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#fff" stroke-width="${mini ? 18 : 15}"/>`,
+        `<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#29b6f6" stroke-width="${mini ? 10 : 7}"/>`,
+        `<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#0288d9" stroke-width="${mini ? 3 : 2}"/>`);
+    }
     if (!mini) for (const b of openB(pl)) { const w = mkW(b.o, b.c, b.a, b.b); out.push(`<line x1="${cm(w[0])}" y1="${cm(w[1])}" x2="${cm(w[2])}" y2="${cm(w[3])}" stroke="#9e9e9e" stroke-width="3" stroke-dasharray="10 8"/>`); }
     for (const w of pl.walls) {
       const [sw, col] = w[4] === "O" ? [4, "#bdbdbd"] : WALL[w[4]] || [8, "#546e7a"];
       if (w[4] === "O" && mini) continue;
       out.push(`<line x1="${cm(w[0])}" y1="${cm(w[1])}" x2="${cm(w[2])}" y2="${cm(w[3])}" stroke="${col}" stroke-width="${mini ? sw * 1.4 : sw}" stroke-linecap="square"${w[4] === "O" ? ' stroke-dasharray="6 6"' : ""}/>`);
+    }
+    for (const w of pl.walls) if (w[4] === "W4") {
+      const v = eq(w[0], w[2]), L = v ? Math.abs(w[3] - w[1]) : Math.abs(w[2] - w[0]);
+      out.push(`<line x1="${cm(w[0])}" y1="${cm(w[1])}" x2="${cm(v ? w[0] + L : w[0])}" y2="${cm(v ? w[1] : w[1] + L)}" stroke="#8d6e63" stroke-width="${mini ? 4 : 3}"/>`);
     }
     if (pl.door && pl.door.length === 2) out.push(`<line x1="${cm(pl.door[0][0])}" y1="${cm(pl.door[0][1])}" x2="${cm(pl.door[1][0])}" y2="${cm(pl.door[1][1])}" stroke="#e65100" stroke-width="${mini ? 16 : 12}"/>`);
     if (mini) { out.push("</svg>"); return out.join(""); }
@@ -382,7 +393,7 @@
     for (const rm of pl.rooms) rm[2] = rm[2].map(R);
     pl.walls = pl.walls.map((w) => P([w[0], w[1]]).concat(P([w[2], w[3]]), [w[4]]));
     if (pl.pos) pl.pos = { entry: P(pl.pos.entry), center: P(pl.pos.center), sat: pl.pos.sat.map(P) };
-    pl.door = (pl.door || []).map(P); pl.windows = (pl.windows || []).map((w) => w.map(P));
+    pl.door = (pl.door || []).map(P); pl.windows = (pl.windows || []).map((w) => winPoints(w).map(P));
     if (pl.bg && pl.bg.m) pl.bg = bgMap(pl.bg, f);
     return normalize(pl);
   }
@@ -468,6 +479,42 @@
     }
     return finish(out);
   }
+  function shapeRects(r, shape) {
+    const [x0, y0, x1, y1] = r, w = x1 - x0, h = y1 - y0;
+    if (shape === "square") {
+      const a = Math.min(w, h), dx = (w - a) / 2, dy = (h - a) / 2;
+      return [[x0 + dx, y0 + dy, x0 + dx + a, y0 + dy + a]];
+    }
+    if (shape === "l1") return [[x0, y0, x0 + w / 2, y1], [x0 + w / 2, y0, x1, y0 + h / 2]];
+    if (shape === "l2") return [[x0, y0 + h / 2, x0 + w / 2, y1], [x0 + w / 2, y0, x1, y1]];
+    return [r];
+  }
+  function carveShape(pl0, r0, type = "ж", wt = "W2", door = true, shape = "rect") {
+    const boxes = shapeRects(snapRect(pl0, r0), shape);
+    if (boxes.some((r) => r[2] - r[0] < 0.5 - EPS || r[3] - r[1] < 0.5 - EPS)) throw new Error("для этой формы каждая часть должна быть не меньше 0,5 × 0,5 м");
+    let pl = clone(pl0);
+    const made = [];
+    for (const r of boxes) {
+      const before = new Set(pl.rooms.map((x) => x[0]));
+      pl = carve(pl, r, type, wt, false);
+      const rm = pl.rooms.find((x) => !before.has(x[0]));
+      if (rm) made.push(rm[0]);
+    }
+    if (!made.length) throw new Error("не удалось создать комнату");
+    for (const name of made.slice(1)) {
+      const i = pl.rooms.findIndex((x) => x[0] === made[0]), j = pl.rooms.findIndex((x) => x[0] === name);
+      if (i >= 0 && j >= 0 && bounds(pl).some((b) => (b.r1 === i && b.r2 === j) || (b.r1 === j && b.r2 === i))) pl = mergeRooms(pl, i, j);
+    }
+    if (door && wt && wt !== "W4") {
+      const ri = pl.rooms.findIndex((x) => x[0] === made[0]);
+      const all = pieces(pl).filter((x) => x.r1 === ri || x.r2 === ri), other = (x) => x.r1 === ri ? x.r2 : x.r1;
+      let list = all.filter((x) => other(x) !== ri && pl.rooms[other(x)] && pl.rooms[other(x)][1] === "п" && x.b - x.a >= DOOR + 0.1);
+      if (!list.length) list = all.filter((x) => other(x) !== ri && x.b - x.a >= DOOR + 0.1);
+      list.sort((a, b) => (b.b - b.a) - (a.b - a.a));
+      if (list.length) pl = doorIn(pl, list[0], (list[0].a + list[0].b) / 2);
+    }
+    return finish(pl);
+  }
   function pieces(pl) {   // участки стен и границ помещений для вкладки «Стены»: { o, c, a, b, t, r1, r2 }; t — тип стены, "" — без стены
     const out = [], WS = pl.walls.map((w) => [wseg(w), w[4]]).filter(([s]) => s), B = bounds(pl);
     const add = (o, c, a, b, r1, r2) => {
@@ -502,6 +549,48 @@
     const d0 = r4(Math.min(p.b - DOOR, Math.max(p.a, Math.round(((at ?? (p.a + p.b) / 2) - DOOR / 2) / SNAP) * SNAP)));
     return setPieces(pl, [{ ...p, a: d0, b: r4(d0 + DOOR) }], "W4");
   }
+  function outerAt(pl, pt, tol = 0.3) {
+    const sides = [{ o: "v", c: 0, a: 0, b: pl.H }, { o: "v", c: pl.W, a: 0, b: pl.H }, { o: "h", c: 0, a: 0, b: pl.W }, { o: "h", c: pl.H, a: 0, b: pl.W }];
+    let best = null;
+    for (const s of sides) {
+      const t = Math.min(s.b, Math.max(s.a, s.o === "v" ? pt[1] : pt[0])), p = s.o === "v" ? [s.c, t] : [t, s.c], d = Math.hypot(p[0] - pt[0], p[1] - pt[1]);
+      if (d <= tol && (!best || d < best.d)) best = { d, s: { ...s, outer: true, at: t } };
+    }
+    return best && best.s;
+  }
+  const winOverlap = (a, b) => a[0] < b[1] - EPS && b[0] < a[1] - EPS;
+  function windowFits(pl, o, c, a, b, skip = -1) {
+    const same = (w) => { const s = winSeg(w); return s && s.o === o && eq(s.c, c); };
+    for (let i = 0; i < (pl.windows || []).length; i++) if (i !== skip && same(pl.windows[i])) {
+      const s = winSeg(pl.windows[i]); if (winOverlap([a, b], [s.a, s.b])) return false;
+    }
+    if (pl.door && pl.door.length === 2 && same(pl.door)) { const s = winSeg(pl.door); if (s && winOverlap([a, b], [s.a, s.b])) return false; }
+    return true;
+  }
+  function addWindow(pl0, seg, width = 1.2) {
+    if (!seg || !seg.outer) throw new Error("окно можно поставить только на наружной стене");
+    const pl = clone(pl0), w = r4(Math.min(seg.b - seg.a, Math.max(0.5, width))), at = seg.at ?? (seg.a + seg.b) / 2;
+    const a = r4(Math.min(seg.b - w, Math.max(seg.a, at - w / 2))), b = r4(a + w);
+    if (!windowFits(pl, seg.o, seg.c, a, b)) throw new Error("здесь уже есть дверь или окно — выберите другое место");
+    pl.windows = pl.windows || []; pl.windows.push(seg.o === "v" ? [[seg.c, a], [seg.c, b]] : [[a, seg.c], [b, seg.c]]); return finish(pl);
+  }
+  function windowAt(pl, pt, tol = 0.25) {
+    let best = null;
+    (pl.windows || []).forEach((w, wi) => { const [a, b] = winPoints(w), d = segDist(pt, [a[0], a[1], b[0], b[1]]); if (d <= tol && (!best || d < best.d)) best = { d, wi, w }; });
+    return best;
+  }
+  function moveWindow(pl0, wi, at, width) {
+    const pl = clone(pl0), w = pl.windows[wi], s = winSeg(w); if (!s) throw new Error("окно не найдено");
+    width = r4(width === undefined ? s.b - s.a : Math.min(3, Math.max(0.5, width)));
+    let a = r4(Math.min(s.o === "v" ? pl.H : pl.W, Math.max(0, at - width / 2))), b = r4(a + width);
+    if (b > (s.o === "v" ? pl.H : pl.W) + EPS) { a = r4((s.o === "v" ? pl.H : pl.W) - width); b = r4(a + width); }
+    if (!windowFits(pl, s.o, s.c, a, b, wi)) throw new Error("окно накладывается на дверь или другое окно");
+    pl.windows[wi] = s.o === "v" ? [[s.c, a], [s.c, b]] : [[a, s.c], [b, s.c]]; return finish(pl);
+  }
+  function resizeWindow(pl0, wi, width) {
+    const pl = clone(pl0), s = winSeg(pl.windows[wi]); if (!s) throw new Error("окно не найдено");
+    return moveWindow(pl, wi, (s.a + s.b) / 2, width);
+  }
   function badRooms(pl) {   // помещения меньше клетки расчётной сетки — для подсветки на плане
     const bad = new Set();
     pl.rooms.forEach(([, , rs], i) => { if (!rs.some((r) => r[0] + STEP / 2 < r[2] && r[1] + STEP / 2 < r[3])) bad.add(i); });
@@ -510,7 +599,8 @@
 
   const api = { fromTemplate, blank, rescale, same, wseg, bounds, openB, junctions, extentAt, range, moveLine, normalize, splitRoom, neighbors, mergeRooms,
     setRoom, setWall, addWall, insertDoor, autoPos, roomAt, check, draw, entryOf, nsatOf, finish, RT, WTYPES, MIN, SNAP, DOOR,
-    mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, pieces, setPieces, doorIn, badRooms, bgAt, bgFit, frameSize, RNAME, WALL, WNAME, RF, STEP,
+    mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, carveShape, shapeRects, pieces, setPieces, doorIn, badRooms,
+    outerAt, addWindow, windowAt, moveWindow, resizeWindow, winSeg, winPoints, bgAt, bgFit, frameSize, RNAME, WALL, WNAME, RF, STEP,
     init: (PLD) => { PL_DATA = PLD; },
     _: { EPS, eq, r4, clone, esc, fm, q, wname, area, big, mkW, onLine, segDist } };   // для layout-ui.js
   root.NetLayout = api;

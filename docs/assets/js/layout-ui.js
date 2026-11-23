@@ -31,7 +31,7 @@
     LA.init(PLD);
     const S = { pl: null, base: null, open: false, view: "start", tab: "rooms", sel: null, scope: "one", nt: "W2", nd: true, draw: false, more: false,
       hist: [], fut: [], drag: null, z: 1, cx: 0, cy: 0, k: 1, note: "", knote: "", undo: null, changed: false, ptr: new Map(),
-      img: null, bgOn: true, bgOp: 1 };   // img — картинка-подложка { src, iw, ih } (только в браузере, см. layout-img.js)
+      img: null, bgOn: true, bgOp: 1, shape: "rect", grid: 0.5, gridOn: true };   // img — картинка-подложка { src, iw, ih } (только в браузере, см. layout-img.js)
     const custom = () => !!S.pl && (!S.base || !LA.same(S.pl, S.base));
     const areaNow = () => { const v = num(F("area").value); return v !== null && v >= 15 && v <= 300 ? v : null; };
     const curCls = () => F("cls").value || opts.eng.classify(F("rooms").value, areaNow())[0];
@@ -127,24 +127,32 @@
       return `Помещения: ${fm(sum, 1)} из ${fm(p.W * p.H, 1)} м² · без наложений${c.warn.length ? ` · <span class="kq-warn">предупреждений: ${c.warn.length}</span>` : ""}`;
     }
     function topHtml() {
-      return `<div class="kq-top"><b class="kq-title">Конструктор<span class="kq-t"> квартиры</span></b><span class="kq-stat" role="status" aria-live="polite"></span><span class="kq-tools">` +
-        (S.view === "edit" ? B("undo", IC.undo + "<span class=\"kq-t\">Отменить</span>", ' title="Отменить (Ctrl+Z)" aria-label="Отменить"') + B("redo", IC.redo + "<span class=\"kq-t\">Повторить</span>", ' title="Повторить (Ctrl+Y)" aria-label="Повторить"') +
-          B("more", "⋯<span class=\"kq-t\"> Ещё</span>", ' aria-haspopup="true" aria-label="Ещё"') : "") + B("done", "Готово", ' data-main="1"') +
-        `</span><div class="kq-menu" hidden>${B("restart", "Начать заново: типовая, с нуля, файл")}${B("ksave", "Сохранить в файл")}${B("kload", "Загрузить из файла")}${B("auto", "Расставить узлы по правилам")}</div></div>`;
+      const editing = S.view === "edit";
+      return `<div class="kq-top"><div class="kq-brand"><b class="kq-title">Конструктор<span class="kq-t"> квартиры</span></b>${S.pl ? `<span class="kq-project">${esc(S.pl.base || S.pl.title || "Своя планировка")}</span>` : ""}</div>` +
+        `<span class="kq-stat" role="status" aria-live="polite"></span><span class="kq-tools">` +
+        (editing ? B("undo", IC.undo, ' title="Отменить (Ctrl+Z)" aria-label="Отменить"') + B("redo", IC.redo, ' title="Повторить (Ctrl+Y)" aria-label="Повторить"') : "") +
+        B("restart", "Новый проект") + B("ksave", "Сохранить", custom() ? "" : " disabled") + B("more", "⋯", ' aria-haspopup="true" aria-label="Ещё"') + B("done", "Готово", ' data-main="1"') +
+        `</span><div class="kq-menu" hidden>${B("kload", "Открыть JSON")}${B("img", "По картинке")}${B("auto", "Расставить узлы по правилам")}` +
+        `<span class="kq-menu-sep"></span>${B("exsvg", "Экспорт SVG")}${B("expng", "Экспорт PNG")}${B("expdf", "Печать / PDF")}</div></div>`;
     }
     function paint() {   // перерисовка окна: каркас — при смене вида, дальше — части
       if (!K) return;
       const ae = document.activeElement, key = ae && K.contains(ae) ? focusKey(ae) : null, side = S.built === S.view + S.tab ? $k(".kq-side") : null, st = side ? side.scrollTop : 0;
       if (S.built !== S.view + S.tab) {
         const zoom = `<div class="kq-zoom">${B("zin", "+", ' aria-label="Крупнее"')}${B("zout", "−", ' aria-label="Мельче"')}${B("zfit", IC.fit, ' aria-label="Целиком"')}</div>`;
+        const bottom = `<div class="kq-bottom"><button type="button" class="kq-grid-b" data-act="grid" aria-pressed="${S.gridOn}">Сетка</button>` +
+          `<label class="kq-grid-step">шаг <select class="kq-gridstep" aria-label="Шаг сетки">${[0.25, 0.5, 1].map((v) => `<option value="${v}"${v === S.grid ? " selected" : ""}>${fm(v)} м</option>`).join("")}</select></label>` +
+          `<span class="kq-snap">привязка 5 см</span><span class="kq-scale"></span></div>`;
+        const stage = (label) => `<div class="kq-stage"><div class="kq-stagebar"><span class="kq-mode">${esc(label)}</span><div class="kq-selbar" aria-label="Действия с выбранным объектом"></div></div>` +
+          `<div class="kq-cv" aria-label="План квартиры" role="img"></div><p class="kq-hint"></p>${zoom}${bottom}</div>`;
+        const rail = `<nav class="kq-rail" role="tablist" aria-label="Инструменты">${X.tabs.map(([t, n]) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}"><span class="kq-tab-ic">${t === "rooms" ? "▦" : t === "walls" ? "┃" : t === "openings" ? "◉" : "⌁"}</span><span>${n}</span></button>`).join("")}</nav>`;
         K.innerHTML = topHtml() + (S.view === "start" ? `<div class="kq-start"></div>` : X.views[S.view] ?
-          `<div class="kq-main"><div class="kq-stage"><div class="kq-cv" aria-label="${esc(X.views[S.view].label || "Рисунок")}" role="img"></div><p class="kq-hint"></p>${zoom}</div><aside class="kq-side"></aside></div>` :
-          `<div class="kq-tabs" role="tablist" aria-label="Режим">${X.tabs.map(([t, n]) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}">${n}</button>`).join("")}</div>` +
-          `<div class="kq-main"><div class="kq-stage"><div class="kq-cv" aria-label="План квартиры" role="img"></div><p class="kq-hint"></p>` +
-          `${zoom}</div><aside class="kq-side"></aside></div>`);
+          `<div class="kq-workspace kq-single"><div class="kq-main">${stage(X.views[S.view].label || "Рисунок")}<aside class="kq-side"></aside></div></div>` :
+          `<div class="kq-workspace">${rail}<div class="kq-main">${stage((X.tab[S.tab] && X.tab[S.tab].label) || (X.tabs.find(([t]) => t === S.tab) || [])[1] || "План")}<aside class="kq-side"></aside></div></div>`);
         S.built = S.view + S.tab;
       }
       $k(".kq-stat").innerHTML = stat();
+      const sb = $k(".kq-selbar"); if (sb) sb.innerHTML = selectionBar();
       const m = $k(".kq-menu"); m.hidden = !S.more; const mb = $k('[data-act="more"]'); if (mb) mb.setAttribute("aria-expanded", String(S.more));
       if (S.view === "start") { $k(".kq-start").innerHTML = startHtml(); }
       else if (X.views[S.view]) { stage(); const sd = $k(".kq-side"); sd.innerHTML = X.views[S.view].side(); sd.scrollTop = st; }
@@ -160,10 +168,25 @@
       return el.classList && el.classList.length ? "." + el.classList[0] : null;
     }
 
+    function selectionBar() {
+      if (S.view !== "edit" || !S.pl || !S.sel) return "";
+      const close = B("unsel", "×", ' aria-label="Снять выделение"');
+      if (S.sel.k === "room" && S.sel.ri < S.pl.rooms.length) {
+        const n = S.pl.rooms[S.sel.ri][0];
+        return `<b>${esc(n)}</b>${B("split", "│", ' data-dir="v" aria-label="Разделить вертикальной стеной" title="Разделить вертикально"')}${B("split", "─", ' data-dir="h" aria-label="Разделить горизонтальной стеной" title="Разделить горизонтально"')}${close}`;
+      }
+      if (S.sel.k === "piece") {
+        const pc = selPiece(S.pl);
+        return `<b>${pc ? esc(wname(pc.t || "Без стены")) : "Стена"}</b>${pc && pc.t && pc.t !== "W4" && pc.b - pc.a >= DOOR + 0.1 - EPS ? B("door", "Дверь", ' aria-label="Добавить дверь в выбранный участок"') : ""}${close}`;
+      }
+      if (S.sel.k === "window") return `<b>Окно ${S.sel.wi + 1}</b>${close}`;
+      return "";
+    }
+
     // ------------------------------------------------------------ старт: как задать планировку
     function startHtml() {
       const A = areaNow(), c0 = curCls(), auto = !F("cls").value, h = [];
-      h.push(`<div class="kq-start-in"><h2>Как задать планировку?</h2><p>Общая площадь из A2: <b>${A ? fm(A, 1) + " м²" : "не указана — как в типовом плане"}</b>. ` +
+      h.push(`<div class="kq-start-in"><h2>Новый проект</h2><p>Общая площадь из A2: <b>${A ? fm(A, 1) + " м²" : "не указана — как в типовом плане"}</b>. ` +
         `Планировка хранится только в этом браузере и в файле, если сохраните.</p>`);
       if (S.knote) h.push(`<p class="kq-note">${esc(S.knote)}</p>`);
       h.push(`<div class="kq-cards"><section class="kq-card kq-rec"><h3>Похожа на типовую <span class="kq-badge">быстро</span></h3>` +
@@ -175,7 +198,8 @@
       h.push(`<section class="kq-card"><h3>С нуля</h3><p>Прямоугольный контур площадью ${fm(Ab, 1)} м²: задайте ширину — длина посчитается. Потом делите комнаты и обводите новые.</p>` +
         `<div class="kq-f"><label>Ширина, м <input type="number" class="kq-nw" min="2" max="30" step="0.05" value="${w}"></label><span>длина — <b class="kq-nh">${fm(Ab / w)}</b> м</span></div>` +
         `<div class="kq-f"><label>Входная дверь <select class="kq-nside">${SIDES.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></label>` +
-        `<label>отступ от угла, м <input type="number" class="kq-noff" min="0" step="0.05" value="0.4"></label></div><p class="kq-err kq-nerr"></p>${B("create", "Создать", ' data-main="1"')}</section>`);
+        `<label>отступ от угла, м <input type="number" class="kq-noff" min="0" step="0.05" value="0.4"></label></div><p class="kq-err kq-nerr"></p>` +
+        `<div class="kq-start-acts">${B("create", "Прямоугольная комната", ' data-main="1"')}${B("drawstart", "Нарисовать комнаты")}</div></section>`);
       h.push(X.cards.map((f) => f()).join(""));
       h.push(`<section class="kq-card"><h3>Открыть сохранённую</h3><p>Файл JSON из конструктора («Сохранить в файл») или JSON-выгрузка расчёта.</p>${B("kload", "Выбрать файл")}` +
         (S.undo ? `<p class="kq-note">${esc(S.undo.why)}</p>${B("restore", "Вернуть прошлую планировку")}` : "") + `</section></div>`);
@@ -216,33 +240,46 @@
       const d = S.drag, p = d && d.pl ? d.pl : S.pl, [x0, y0, w, h] = vb(p);
       const cw = cv.clientWidth || 600, ch = cv.clientHeight || 400; S.k = Math.min(cw / (w * 100), ch / (h * 100));   // пикселей на сантиметр
       const px = (n) => n / S.k, fs = Math.round(Math.min(px(15), Math.max(px(11), Math.min(34, Math.max(18, Math.max(p.W, p.H) * 100 / 28)))));
+      const gs = cm(S.grid);
       const out = [`<svg class="kq-svg" viewBox="${cm(x0)} ${cm(y0)} ${cm(w)} ${cm(h)}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="font-size:${fs}px">`,
+        `<defs><pattern id="kqgrid" width="${gs}" height="${gs}" patternUnits="userSpaceOnUse"><path d="M ${gs} 0 L 0 0 0 ${gs}" fill="none" stroke="#e5e7eb" stroke-width="1"/></pattern>` +
+        `<pattern id="kqmajor" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#kqgrid)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cbd5e1" stroke-width="1.5"/></pattern></defs>`,
         `<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="#fff"/>`];
+      if (S.gridOn) out.push(`<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="url(#kqmajor)"/>`);
       const bad = LA.badRooms(p), selR = S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length ? S.sel.ri : -1, bg = S.img && p.bg && p.bg.m && S.bgOn;
       if (bg) out.push(`<image href="${S.img.src}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
       p.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${i === selR ? "#ffe0b2" : RF[t] || "#f5f5f5"}"${bg ? ` fill-opacity="${i === selR ? 0.45 : 0.25}"` : ""}/>`); });
       for (const f of X.layers.under) f(p, out, px);   // слои расширений под стенами (карта сигнала)
       out.push(`<rect x="0" y="0" width="${cm(p.W)}" height="${cm(p.H)}" fill="none" stroke="#37474f" stroke-width="${px(3)}"/>`);
-      for (const wd of p.windows || []) out.push(`<line x1="${cm(wd[0][0])}" y1="${cm(wd[0][1])}" x2="${cm(wd[1][0])}" y2="${cm(wd[1][1])}" stroke="#81d4fa" stroke-width="${px(5)}"/>`);
+      for (const wd of p.windows || []) {
+        const [a, b] = LA.winPoints(wd);
+        out.push(`<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#fff" stroke-width="${px(7)}"/>`,
+          `<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#29b6f6" stroke-width="${px(4.5)}"/>`,
+          `<line x1="${cm(a[0])}" y1="${cm(a[1])}" x2="${cm(b[0])}" y2="${cm(b[1])}" stroke="#0288d9" stroke-width="${px(1.5)}"/>`);
+      }
       for (const b of LA.openB(p)) { const l = mkW(b.o, b.c, b.a, b.b); out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#9e9e9e" stroke-width="${px(1.5)}" stroke-dasharray="${px(5)} ${px(4)}"/>`); }
       for (const l of p.walls) {
         const [sw, col] = l[4] === "O" ? [4, "#bdbdbd"] : WALL[l[4]] || [8, "#546e7a"];
         out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="${col}" stroke-width="${Math.max(sw, px(2))}" stroke-linecap="square"${l[4] === "O" ? ` stroke-dasharray="${px(4)} ${px(4)}"` : ""}/>`);
+      }
+      for (const l of p.walls) if (l[4] === "W4") {
+        const v = eq(l[0], l[2]), L = v ? Math.abs(l[3] - l[1]) : Math.abs(l[2] - l[0]);
+        out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(v ? l[0] + L : l[0])}" y2="${cm(v ? l[1] : l[1] + L)}" stroke="#8d6e63" stroke-width="${px(2)}"/>`);
       }
       if (p.door && p.door.length === 2) out.push(`<line x1="${cm(p.door[0][0])}" y1="${cm(p.door[0][1])}" x2="${cm(p.door[1][0])}" y2="${cm(p.door[1][1])}" stroke="#e65100" stroke-width="${Math.max(12, px(5))}"/>`);
       bad.forEach((i) => { for (const r of p.rooms[i][2]) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="none" stroke="#d50000" stroke-width="${px(3)}" stroke-dasharray="${px(6)} ${px(4)}"/>`); });
       if (S.tab === "walls") {
         const pc = selPiece(p);
         if (pc) {
-          for (const x of scopeList(p, pc)) { const l = mkW(x.o, x.c, x.a, x.b); out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#ff6d00" stroke-opacity=".35" stroke-width="${px(12)}" stroke-linecap="round"/>`); }
-          const l = mkW(pc.o, pc.c, pc.a, pc.b); out.push(`<line x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#ff6d00" stroke-width="${px(5)}" stroke-linecap="round"/>`);
+          for (const x of scopeList(p, pc)) { const l = mkW(x.o, x.c, x.a, x.b); out.push(`<line class="kq-edit-only" x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#ff6d00" stroke-opacity=".35" stroke-width="${px(12)}" stroke-linecap="round"/>`); }
+          const l = mkW(pc.o, pc.c, pc.a, pc.b); out.push(`<line class="kq-edit-only" x1="${cm(l[0])}" y1="${cm(l[1])}" x2="${cm(l[2])}" y2="${cm(l[3])}" stroke="#ff6d00" stroke-width="${px(5)}" stroke-linecap="round"/>`);
         }
       }
       if (selR >= 0) {   // выбранная комната: контур, размеры, кружки на внутренних краях
         const rs = p.rooms[selR][2], r = big(rs);
-        for (const x of rs) out.push(`<rect x="${cm(x[0])}" y="${cm(x[1])}" width="${cm(x[2]) - cm(x[0])}" height="${cm(x[3]) - cm(x[1])}" fill="none" stroke="#ff6d00" stroke-width="${px(2.5)}"/>`);
-        out.push(`<text x="${cm((r[0] + r[2]) / 2)}" y="${cm(r[1]) + px(14)}" class="kq-dim">${fm(r[2] - r[0])} м</text>`,
-          `<text x="${cm(r[0]) + px(14)}" y="${cm((r[1] + r[3]) / 2)}" class="kq-dim" transform="rotate(-90 ${cm(r[0]) + px(14)} ${cm((r[1] + r[3]) / 2)})">${fm(r[3] - r[1])} м</text>`);
+        for (const x of rs) out.push(`<rect class="kq-edit-only" x="${cm(x[0])}" y="${cm(x[1])}" width="${cm(x[2]) - cm(x[0])}" height="${cm(x[3]) - cm(x[1])}" fill="none" stroke="#ff6d00" stroke-width="${px(2.5)}"/>`);
+        out.push(`<text class="kq-dim kq-edit-only" x="${cm((r[0] + r[2]) / 2)}" y="${cm(r[1]) + px(14)}">${fm(r[2] - r[0])} м</text>`,
+          `<text class="kq-dim kq-edit-only" x="${cm(r[0]) + px(14)}" y="${cm((r[1] + r[3]) / 2)}" transform="rotate(-90 ${cm(r[0]) + px(14)} ${cm((r[1] + r[3]) / 2)})">${fm(r[3] - r[1])} м</text>`);
       }
       p.rooms.forEach(([n, , rs]) => {
         const r = big(rs), a = rs.reduce((s, x) => s + area(x), 0), x = cm((r[0] + r[2]) / 2), y = cm((r[1] + r[3]) / 2);
@@ -258,16 +295,16 @@
       }
       if (selR >= 0 && !S.draw) for (const e of LA.roomEdges(p, selR)) {   // кружки
         const m = (e.lo + e.hi) / 2, [hx, hy] = e.o === "v" ? [e.c, m] : [m, e.c], R = px(15), on = d && d.kind === "edge" && d.e.o === e.o && eq(d.e.lo, e.lo) && eq(d.e.hi, e.hi);
-        out.push(`<circle cx="${cm(hx)}" cy="${cm(hy)}" r="${R}" fill="${on ? "#e65100" : "#ff6d00"}" stroke="#fff" stroke-width="${px(3)}"/><text x="${cm(hx)}" y="${cm(hy)}" class="kq-hd" style="font-size:${px(17)}px">${e.o === "v" ? "↔" : "↕"}</text>`);
+        out.push(`<circle class="kq-edit-only" cx="${cm(hx)}" cy="${cm(hy)}" r="${R}" fill="${on ? "#e65100" : "#ff6d00"}" stroke="#fff" stroke-width="${px(3)}"/><text class="kq-hd kq-edit-only" x="${cm(hx)}" y="${cm(hy)}" style="font-size:${px(17)}px">${e.o === "v" ? "↔" : "↕"}</text>`);
       }
       if (d && d.kind === "edge" && d.pl) {
         const e = d.e, v = d.v, l = mkW(e.o, v, e.lo, e.hi), mx = (l[0] + l[2]) / 2, my = (l[1] + l[3]) / 2;
-        out.push(`<text x="${cm(mx) + (e.o === "v" ? 0 : 0)}" y="${cm(my) - px(26)}" class="kq-tip">${e.o === "v" ? "x" : "y"} = ${fm(v)} м</text>`);
+        out.push(`<text class="kq-tip kq-edit-only" x="${cm(mx) + (e.o === "v" ? 0 : 0)}" y="${cm(my) - px(26)}">${e.o === "v" ? "x" : "y"} = ${fm(v)} м</text>`);
       }
       if (d && d.kind === "rect") {
         const r = LA.snapRect(p, [d.p0[0], d.p0[1], d.p1[0], d.p1[1]]);
-        out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="#ff6d00" fill-opacity=".15" stroke="#ff6d00" stroke-width="${px(2.5)}" stroke-dasharray="${px(6)} ${px(4)}"/>`,
-          `<text x="${cm((r[0] + r[2]) / 2)}" y="${cm((r[1] + r[3]) / 2)}" class="kq-tip">${fm(r[2] - r[0])} × ${fm(r[3] - r[1])} м</text>`);
+        out.push(`<rect class="kq-edit-only" x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="#ff6d00" fill-opacity=".15" stroke="#ff6d00" stroke-width="${px(2.5)}" stroke-dasharray="${px(6)} ${px(4)}"/>`,
+          `<text class="kq-tip kq-edit-only" x="${cm((r[0] + r[2]) / 2)}" y="${cm((r[1] + r[3]) / 2)}">${fm(r[2] - r[0])} × ${fm(r[3] - r[1])} м</text>`);
       }
       for (const f of X.layers.over) f(p, out, px);   // слои расширений поверх плана
       out.push(`<text x="${cm(p.W / 2)}" y="${cm(-0.22)}" class="kq-out">${fm(p.W)} м</text><text x="${cm(-0.22)}" y="${cm(p.H / 2)}" class="kq-out" transform="rotate(-90 ${cm(-0.22)} ${cm(p.H / 2)})">${fm(p.H)} м</text>`);
@@ -275,6 +312,9 @@
       cv.innerHTML = out.join("");
       cv.setAttribute("aria-label", `План: ${fm(p.W)} × ${fm(p.H)} м, помещений — ${p.rooms.length}`);
       cv.classList.toggle("kq-drawing", !!S.draw);
+      const scale = $k(".kq-scale"); if (scale) scale.textContent = `1 м = ${Math.round(S.k * 100)} px`;
+      const gb = $k('[data-act="grid"]'); if (gb) gb.setAttribute("aria-pressed", String(S.gridOn));
+      const grid = $k(".kq-gridstep"); if (grid) grid.value = String(S.grid);
       if (!light) $k(".kq-hint").textContent = hint();
     }
     function hint() {
@@ -302,7 +342,8 @@
       const ds = LA.doorSide(p);
       return `<h3>Комнаты</h3><p class="kq-note">Нажмите на комнату на плане или здесь:</p><div class="kq-chips">${p.rooms.map(([n, t], i) => `<button type="button" class="kq-chip" data-act="pick" data-ri="${i}"><i style="background:${RF[t]}"></i>${esc(n)}</button>`).join("")}</div>` +
         `<h4>Новая комната</h4><p>${B("draw", S.draw ? "Отменить обводку" : "＋ Нарисовать комнату", ` aria-pressed="${S.draw}"`)}</p>` +
-        `<p class="kq-note">Проведите по плану прямоугольник: новая комната заберёт площадь у тех, кого накроет. Края ближе 35 см к стене прилипают к ней.</p>` +
+        `<div class="kq-shapes" role="group" aria-label="Форма новой комнаты">${[["rect", "Прямоугольная", "▭"], ["square", "Квадратная", "□"], ["l1", "L-образная 1", "L"], ["l2", "L-образная 2", "⅃"]].map(([k, n, ic]) => `<button type="button" class="kq-shape" data-act="shape" data-t="${k}" aria-pressed="${S.shape === k}"><b>${ic}</b><span>${n}</span></button>`).join("")}</div>` +
+        `<p class="kq-note">Проведите по плану: новая комната заберёт площадь у тех, кого накроет. Края ближе 35 см к стене прилипают к ней.</p>` +
         `<div class="kq-f"><label>Стены новой комнаты <select class="kq-nt">${wopt(S.nt, true)}</select></label><label class="kq-chk"><input type="checkbox" class="kq-nd"${S.nd ? " checked" : ""}> с дверью ${fm(DOOR, 1)} м</label></div>` +
         `<h4>Весь план</h4><div class="kq-acts">${B("mirx", IC.mirx + "Отразить слева направо")}${B("miry", IC.miry + "Отразить сверху вниз")}${B("rot", IC.rot + "Повернуть на 90°")}</div>` +
         `<div class="kq-f"><label>Ширина квартиры, м <input type="number" class="kq-W" min="2" max="30" step="0.05" value="${r2(p.W)}"></label><span>длина — ${fm(p.H)} м; площадь ${fm(p.W * p.H, 1)} м² не меняется</span></div>` +
@@ -372,12 +413,21 @@
             S.view = "edit"; S.tab = "rooms"; S.sel = { k: "room", ri: 0 }; S.z = 1; F("cls").value = c; if (!areaNow()) F("area").value = String(r2(A));
             S.knote = "Контур готов. Разделите комнату пополам или обведите новые комнаты прямоугольником."; changed();
           }
+          else if (act === "drawstart") {
+            const A = areaNow() || typ(curCls()).area, w = num($k(".kq-nw").value), er = $k(".kq-nerr");
+            if (w === null || w < 2 || w > 30 || A / w < 2 || A / w > 30) { er.textContent = `ширина и длина — от 2 до 30 м (площадь ${fm(A, 1)} м²)`; return; }
+            const c = curCls(); drop("Своя планировка заменена новой.");
+            S.hist = []; S.fut = []; S.pl = LA.blank(PLD, c, A, w, $k(".kq-nside").value, num($k(".kq-noff").value) || 0); S.base = null;
+            S.view = "edit"; S.tab = "rooms"; S.sel = null; S.draw = true; S.z = 1; F("cls").value = c; if (!areaNow()) F("area").value = String(r2(A));
+            S.knote = "Контур готов. Выберите форму комнаты и проведите по плану."; changed();
+          }
           else if (act === "tab") { S.tab = b.dataset.t; S.sel = null; S.draw = false; S.scope = "one"; S.knote = ""; paint(); }
           else if (act === "zin" || act === "zout") { zoomBy(act === "zin" ? 1.5 : 1 / 1.5, null); }
           else if (act === "zfit") { S.z = 1; stage(); }
           else if (act === "pick") { S.sel = { k: "room", ri: +b.dataset.ri }; S.knote = ""; paint(); }
           else if (act === "unsel") { S.sel = null; S.knote = ""; paint(); }
           else if (act === "draw") { S.draw = !S.draw; S.sel = null; S.knote = ""; paint(); }
+          else if (act === "shape") { S.shape = b.dataset.t; S.draw = true; S.sel = null; S.knote = ""; paint(); }
           else if (act === "mirx" || act === "miry") commit(LA.mirror(p, act === "mirx" ? "x" : "y"));
           else if (act === "rot") { S.z = 1; commit(LA.rotate(p)); }
           else if (act === "auto") { const np = clone(p); np.auto = true; delete np.manual; commit(LA.finish(np)); }
@@ -483,7 +533,7 @@
           else if (d.kind === "rect") {
             const r = LA.snapRect(S.pl, [d.p0[0], d.p0[1], d.p1[0], d.p1[1]]);
             if (r[2] - r[0] < 0.5 || r[3] - r[1] < 0.5) { S.knote = "Слишком маленький прямоугольник — проведите крупнее (от 0,5 × 0,5 м)."; paint(); return; }
-            const np = LA.carve(geo(S.pl), r, "ж", S.nt, S.nd), ri = np.rooms.findIndex((x) => !S.pl.rooms.some((y) => y[0] === x[0]));
+            const np = LA.carveShape(geo(S.pl), r, "ж", S.nt, S.nd, S.shape), ri = np.rooms.findIndex((x) => !S.pl.rooms.some((y) => y[0] === x[0]));
             S.draw = false; commit(np, ri >= 0 ? { k: "room", ri } : null);
             S.knote = "Новая комната готова — выберите её тип и название."; paint();
           } else if (d.kind === "tap" && !d.moved) {
