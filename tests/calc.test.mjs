@@ -242,7 +242,7 @@ for (const cls of Object.keys(NE.PLAN_OF)) {
   assert.deepEqual(LA.check(cv).err, []); assert.ok(LA.same(LA.normalize(structuredClone(cv)), cv));
 }
 
-// 13. Предпросмотр сигнала в конструкторе (engine.js: preview, why; вкладка «Роутер» — layout-net.js): та же карта, что в расчёте,
+// 13. Предпросмотр сигнала в планировщике (engine.js: preview, why; вкладка «Сеть» — layout-network.js): та же карта, что в расчёте,
 // с точностью до ЭИИМ узла; разбор точки сходится с картой; расчёт И4 не меняется (31 пример — engine.test.mjs)
 {
   let n = 0;

@@ -37,7 +37,7 @@
     const curCls = () => F("cls").value || opts.eng.classify(F("rooms").value, areaNow())[0];
     const typ = (c) => PLD.plans[NE.PLAN_OF[c]];
     const geo = (p) => (p.manual ? p : { ...p, auto: true });   // после правок геометрии узлы — по правилам размещения (Ш6), если не заданы вручную
-    let K = null, lastFocus = null;
+    let K = null, lastFocus = null, inertState = [];
     host.innerHTML = `<div class="nc-lay-form"></div><input type="file" class="nc-lay-file" accept=".json,application/json" hidden>`;
     const $h = (s) => host.querySelector(s);
     function wt5() {   // потери стен на 5 ГГц для подписей (И2, табл. 4; тип дома A1 и замер B1 — как в engine.js)
@@ -81,8 +81,7 @@
     const tryDo = (fn) => { try { fn(); } catch (e) { S.knote = e.message; S.note = e.message; render(); } };
     function template(c, A) { S.pl = LA.fromTemplate(PLD, c, A); S.base = clone(S.pl); S.hist = []; S.fut = []; S.sel = null; }
     function adopt(pl, why) {   // своя планировка из хранилища или файла
-      const p = LA.normalize(clone(pl)), c = LA.check(p);
-      if (c.err.length) throw new Error("планировка не прошла проверку: " + c.err.join("; "));
+      const p = LA.validatePlan(pl);
       if (!NE.PLAN_OF[p.cls]) p.cls = curCls();
       S.hist.push(S.pl); S.fut = []; S.pl = p; S.base = p.base && PLD.plans[p.base] ? LA.fromTemplate(PLD, p.cls, p.W * p.H) : null; S.sel = null;
       F("cls").value = p.cls; F("area").value = String(r2(p.W * p.H)); S.note = why; S.knote = why; S.undo = null;
@@ -105,11 +104,17 @@
       }
       S.open = true; S.view = view || (custom() ? "edit" : "start"); S.sel = null; S.draw = false; S.more = false; S.z = 1; S.knote = S.note || "";
       document.documentElement.classList.add("kq-lock");
-      S.built = null; paint(); K.focus({ preventScroll: true });
+      inertState = [...document.body.children].filter((el) => el !== K).map((el) => [el, el.inert]);
+      for (const [el] of inertState) el.inert = true;
+      S.built = null; paint();
+      const first = K.querySelector("button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex='0']");
+      (first || K).focus({ preventScroll: true });
     }
     function closeK() {
       S.open = false; S.sel = null; S.draw = false; S.drag = null; S.ptr.clear();
       if (K) { K.remove(); K = null; }
+      for (const [el, wasInert] of inertState) el.inert = wasInert;
+      inertState = [];
       document.documentElement.classList.remove("kq-lock");
       renderForm();
       const b = $h('[data-act="open"].nc-lay-b'); if (b) b.focus({ preventScroll: true }); else if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
@@ -144,7 +149,7 @@
           `<label class="kq-grid-step">шаг <select class="kq-gridstep" aria-label="Шаг сетки">${[0.25, 0.5, 1].map((v) => `<option value="${v}"${v === S.grid ? " selected" : ""}>${fm(v)} м</option>`).join("")}</select></label>` +
           `<span class="kq-snap">привязка 5 см</span><span class="kq-scale"></span></div>`;
         const stage = (label) => `<div class="kq-stage"><div class="kq-stagebar"><span class="kq-mode">${esc(label)}</span><div class="kq-selbar" aria-label="Действия с выбранным объектом"></div></div>` +
-          `<div class="kq-cv" aria-label="План квартиры" role="img"></div><p class="kq-hint"></p>${zoom}${bottom}</div>`;
+          `<div class="kq-cv" tabindex="0" role="group" aria-label="План квартиры. Выберите объект; стрелки перемещают выбранное сетевое устройство"></div><p class="kq-hint"></p>${zoom}${bottom}</div>`;
         const tool = (t, n, ic) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}"><span class="kq-tab-ic">${ic}</span><span>${n}</span></button>`;
         const rail = `<nav class="kq-rail" role="tablist" aria-label="Инструменты"><div class="kq-rail-title">Планировка</div>` +
           tool("rooms", "Комнаты", "▦") + tool("walls", "Стены", "┃") + tool("openings", "Проёмы", "◉") +
@@ -254,7 +259,7 @@
         `<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="#fff"/>`];
       if (S.gridOn) out.push(`<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="url(#kqmajor)"/>`);
       const bad = LA.badRooms(p), selR = S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length ? S.sel.ri : -1, bg = S.img && p.bg && p.bg.m && S.bgOn;
-      if (bg) out.push(`<image href="${S.img.src}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
+      if (bg) out.push(`<image href="${esc(S.img.src)}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
       p.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${i === selR ? "#ffe0b2" : RF[t] || "#f5f5f5"}"${bg ? ` fill-opacity="${i === selR ? 0.45 : 0.25}"` : ""}/>`); });
       for (const f of X.layers.under) f(p, out, px);   // слои расширений под стенами (карта сигнала)
       out.push(`<rect x="0" y="0" width="${cm(p.W)}" height="${cm(p.H)}" fill="none" stroke="#37474f" stroke-width="${px(3)}"/>`);
@@ -378,11 +383,12 @@
         `<p>${B("unsel", "Снять выделение")}</p>`;
     }
     function wallsSide(p) {
-      const L = wt5(), pc = selPiece(p);
+      const L = wt5(), pc = selPiece(p), all = LA.pieces(p);
       const pal = (cur, act) => `<div class="kq-pal">${PAL.map((t) => `<button type="button" class="kq-pb" data-act="${act}" data-t="${t}"${act ? ` aria-pressed="${t === cur}"` : " disabled"}>${sample(t)}<span>${esc(wname(t))}</span><b>${fm(L[t], 0)} дБ</b></button>`).join("")}` +
         `<button type="button" class="kq-pb" data-act="${act}" data-t=""${act ? ` aria-pressed="${cur === "" || cur === "O"}"` : " disabled"}>${sample("")}<span>нет стены — проём, арка, граница зон</span><b>0 дБ</b></button></div>`;
-      if (!pc) return `<h3>Стены</h3><p class="kq-note">Стены строятся сами по границам комнат. Нажмите на стену или пунктир между комнатами, чтобы выбрать тип. Потери на 5 ГГц — по И2 (табл. 4) с учётом типа дома A1 и замера B1.</p>${pal(null, "")}`;
-      const nm = (i) => (i >= 0 && p.rooms[i] ? `«${esc(p.rooms[i][0])}»` : "—"), all = LA.pieces(p), cnt = (sc) => { const o = S.scope; S.scope = sc; const n = scopeList(p, pc).length; S.scope = o; return n; };
+      if (!pc) return `<h3>Стены</h3><p class="kq-note">Стены строятся сами по границам комнат. Выберите участок списком или нажмите на стену. Потери на 5 ГГц — по И2 (табл. 4) с учётом типа дома A1 и замера B1.</p>${pal(null, "")}` +
+        `<h4>Участки стен</h4><div class="kq-nlist">${all.map((x, i) => `<button type="button" class="kq-chip" data-act="wallpick" data-i="${i}">${esc(wname(x.t || "Без стены"))} — ${fm(x.b - x.a, 1)} м</button>`).join("")}</div>`;
+      const nm = (i) => (i >= 0 && p.rooms[i] ? `«${esc(p.rooms[i][0])}»` : "—"), cnt = (sc) => { const o = S.scope; S.scope = sc; const n = scopeList(p, pc).length; S.scope = o; return n; };
       const scopes = [["one", "этот участок"], ["line", `вся линия (${cnt("line")})`]];
       if (pc.r1 >= 0) scopes.push(["r1", `все стены ${nm(pc.r1)} (${cnt("r1")})`]);
       if (pc.r2 >= 0 && pc.r2 !== pc.r1) scopes.push(["r2", `все стены ${nm(pc.r2)} (${cnt("r2")})`]);
@@ -394,6 +400,7 @@
     }
 
     // ------------------------------------------------------------ события конструктора
+    X.acts.wallpick = (b) => { const x = LA.pieces(S.pl)[+b.dataset.i]; if (x) { S.sel = { k: "piece", o: x.o, c: x.c, at: (x.a + x.b) / 2 }; S.scope = "one"; X.paint(); } };
     function bindK() {
       K.addEventListener("click", (ev) => {
         const b = ev.target.closest("[data-act]"); if (!b || b.disabled || !K.contains(b)) return;
@@ -473,6 +480,12 @@
       K.addEventListener("keydown", (ev) => {
         const tag = ev.target.tagName;
         if (ev.key === "Escape") { ev.preventDefault(); if (S.drag) { S.drag = null; stage(); } else if (S.more) { S.more = false; paint(); } else if (S.draw || S.sel) { S.draw = false; S.sel = null; paint(); } else closeK(); return; }
+        if (ev.target.classList.contains("kq-cv") && /^Arrow/.test(ev.key) && S.sel && S.sel.k === "device") {
+          const dev = (S.pl.network || []).find((d) => d.id === S.sel.id); if (!dev) return;
+          ev.preventDefault(); const step = ev.shiftKey ? SNAP * 5 : SNAP, dx = ev.key === "ArrowLeft" ? -step : ev.key === "ArrowRight" ? step : 0, dy = ev.key === "ArrowUp" ? -step : ev.key === "ArrowDown" ? step : 0;
+          tryDo(() => { const np = LA.moveDevice(S.pl, dev.id, [dev.pos[0] + dx, dev.pos[1] + dy]); if (dev.id === "R1") { np.pos.center = np.network.find((d) => d.id === "R1").pos.slice(); np.auto = false; np.manual = true; } commit(np, S.sel); });
+          return;
+        }
         if ((ev.ctrlKey || ev.metaKey) && !/INPUT|SELECT|TEXTAREA/.test(tag)) {
           const k = ev.key.toLowerCase();
           if (k === "z" && !ev.shiftKey && S.hist.length) { ev.preventDefault(); S.fut.push(S.pl); S.pl = S.hist.pop(); S.sel = null; changed(); }
@@ -481,8 +494,8 @@
         if (ev.key === "Tab") {   // фокус не уходит из окна
           const f = [...K.querySelectorAll("button:not([disabled]), input, select, [tabindex='0']")].filter((e) => e.offsetParent !== null);
           if (!f.length) return;
-          if (ev.shiftKey && document.activeElement === f[0]) { ev.preventDefault(); f[f.length - 1].focus(); }
-          else if (!ev.shiftKey && document.activeElement === f[f.length - 1]) { ev.preventDefault(); f[0].focus(); }
+          if (ev.shiftKey && (document.activeElement === f[0] || document.activeElement === K)) { ev.preventDefault(); f[f.length - 1].focus(); }
+          else if (!ev.shiftKey && (document.activeElement === f[f.length - 1] || document.activeElement === K)) { ev.preventDefault(); f[0].focus(); }
         }
       });
       // план: касание, перетаскивание, масштаб
@@ -583,9 +596,10 @@
       const t = ev.target;
       if (!t.matches(".nc-lay-file") || !t.files || !t.files[0]) return;
       const f = t.files[0]; t.value = "";
-      f.text().then((txt) => { tryDo(() => { const o = JSON.parse(txt), p = o.plan || (o.input && o.input.plan) || (o.rooms ? o : null);
-        if (!p) throw new Error("в файле нет планировки"); if (custom()) drop("Своя планировка заменена планировкой из файла.");
-        adopt(p, `Загружена планировка из файла «${f.name}».`); if (S.open) { S.view = "edit"; S.tab = "rooms"; S.z = 1; } changed(); }); });
+      if (f.size > LA.PLAN_JSON_MAX) { tryDo(() => { throw new Error("файл планировки слишком большой"); }); return; }
+      f.text().then((txt) => { tryDo(() => { const p = LA.parsePlanText(txt);
+        if (custom()) drop("Своя планировка заменена планировкой из файла.");
+        adopt(p, `Загружена планировка из файла «${f.name}».`); if (S.open) { S.view = "edit"; S.tab = "rooms"; S.z = 1; } changed(); }); }).catch((e) => tryDo(() => { throw e; }));
     });
     fe.addEventListener("change", (ev) => {   // поля A1–A4, B1 формы
       const n = ev.target.name;
@@ -600,8 +614,8 @@
       else if (n === "constr" || n === "L_W1") render();
     });
     try {   // своя планировка из прошлого сеанса (localStorage)
-      const o = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (o && o.plan) adopt(o.plan, "Восстановлена своя планировка, сохранённая в этом браузере.");
+      const txt = localStorage.getItem(KEY);
+      if (txt) adopt(LA.parsePlanText(txt), "Восстановлена своя планировка, сохранённая в этом браузере.");
       if (!custom()) { S.pl = null; S.note = ""; }
     } catch (e) { S.pl = null; S.note = ""; }
     S.hist = []; S.fut = []; S.knote = "";
