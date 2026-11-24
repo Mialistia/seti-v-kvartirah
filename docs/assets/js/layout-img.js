@@ -13,12 +13,13 @@
   (LA.ext = LA.ext || []).push((X) => {
     const { S, F, PLD, B, SIDES, num, r2, cm, $k, $h, areaNow, typ, curCls } = X;
     S.fr = null; S.sc = "A"; S.L = null;
-    if (S.pl && S.pl.bg) { try { S.img = JSON.parse(localStorage.getItem(IMG) || "null"); } catch (e) { S.img = null; } }   // картинка прошлого сеанса
+    if (S.pl && S.pl.bg) { try { const img = JSON.parse(localStorage.getItem(IMG) || "null"); S.img = img ? LA.validateImage(img) : null; } catch (e) { S.img = null; } }   // картинка прошлого сеанса
     X.host.insertAdjacentHTML("beforeend", `<input type="file" class="nc-lay-img" accept="image/*" hidden>`);
     X.host.addEventListener("change", (ev) => { const t = ev.target; if (!t.matches(".nc-lay-img") || !t.files || !t.files[0]) return; const f = t.files[0]; t.value = ""; X.tryDo(() => loadImg(f)); });
 
     function loadImg(f) {   // картинка уменьшается до 1600 пикселей по большей стороне и хранится как JPEG
-      if (!/^image\//.test(f.type || "")) throw new Error("нужен файл картинки: JPG, PNG, WebP");
+      if (!["image/jpeg", "image/png", "image/webp"].includes(f.type || "")) throw new Error("нужен файл картинки: JPG, PNG, WebP");
+      if (f.size > LA.IMAGE_FILE_MAX) throw new Error("картинка слишком большая — максимум 8 МБ");
       const u = URL.createObjectURL(f), im = new Image();
       im.onload = () => { URL.revokeObjectURL(u); X.tryDo(() => {
         const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight)), w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
@@ -43,7 +44,7 @@
         const [x0, y0, w, h] = X.vb(this.box()), cw = cv.clientWidth || 600, ch = cv.clientHeight || 400; S.k = Math.min(cw / (w * 100), ch / (h * 100));
         const px = (n) => n / S.k, f = S.fr, iw = S.img.iw, ih = S.img.ih, d = S.drag, on = d && d.kind === "fr" ? d.i : -1, dm = dims();
         const out = [`<svg class="kq-svg" viewBox="${cm(x0)} ${cm(y0)} ${cm(w)} ${cm(h)}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="font-size:${Math.round(px(14))}px">`,
-          `<image href="${S.img.src}" x="0" y="0" width="${iw}" height="${ih}" preserveAspectRatio="none"/>`,
+          `<image href="${esc(S.img.src)}" x="0" y="0" width="${iw}" height="${ih}" preserveAspectRatio="none"/>`,
           `<path d="M0 0H${iw}V${ih}H0Z M${f[0]} ${f[1]}H${f[2]}V${f[3]}H${f[0]}Z" fill="#263238" fill-opacity=".45" fill-rule="evenodd"/>`,
           `<rect x="${f[0]}" y="${f[1]}" width="${f[2] - f[0]}" height="${f[3] - f[1]}" fill="none" stroke="#ff6d00" stroke-width="${px(2.5)}"/>`,
           `<text x="${(f[0] + f[2]) / 2}" y="${f[1] + px(22)}" class="kq-tip">${fm(dm.W)} м</text>`,

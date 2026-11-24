@@ -81,8 +81,7 @@
     const tryDo = (fn) => { try { fn(); } catch (e) { S.knote = e.message; S.note = e.message; render(); } };
     function template(c, A) { S.pl = LA.fromTemplate(PLD, c, A); S.base = clone(S.pl); S.hist = []; S.fut = []; S.sel = null; }
     function adopt(pl, why) {   // своя планировка из хранилища или файла
-      const p = LA.normalize(clone(pl)), c = LA.check(p);
-      if (c.err.length) throw new Error("планировка не прошла проверку: " + c.err.join("; "));
+      const p = LA.validatePlan(pl);
       if (!NE.PLAN_OF[p.cls]) p.cls = curCls();
       S.hist.push(S.pl); S.fut = []; S.pl = p; S.base = p.base && PLD.plans[p.base] ? LA.fromTemplate(PLD, p.cls, p.W * p.H) : null; S.sel = null;
       F("cls").value = p.cls; F("area").value = String(r2(p.W * p.H)); S.note = why; S.knote = why; S.undo = null;
@@ -254,7 +253,7 @@
         `<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="#fff"/>`];
       if (S.gridOn) out.push(`<rect x="${cm(-PAD)}" y="${cm(-PAD)}" width="${cm(p.W + 2 * PAD)}" height="${cm(p.H + 2 * PAD)}" fill="url(#kqmajor)"/>`);
       const bad = LA.badRooms(p), selR = S.sel && S.sel.k === "room" && S.sel.ri < p.rooms.length ? S.sel.ri : -1, bg = S.img && p.bg && p.bg.m && S.bgOn;
-      if (bg) out.push(`<image href="${S.img.src}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
+      if (bg) out.push(`<image href="${esc(S.img.src)}" x="0" y="0" width="${p.bg.iw}" height="${p.bg.ih}" preserveAspectRatio="none" opacity="${S.bgOp}" transform="matrix(${p.bg.m.map((v) => Math.round(v * 1e8) / 1e6).join(" ")})"/>`);
       p.rooms.forEach(([, t, rs], i) => { for (const r of rs) out.push(`<rect x="${cm(r[0])}" y="${cm(r[1])}" width="${cm(r[2]) - cm(r[0])}" height="${cm(r[3]) - cm(r[1])}" fill="${i === selR ? "#ffe0b2" : RF[t] || "#f5f5f5"}"${bg ? ` fill-opacity="${i === selR ? 0.45 : 0.25}"` : ""}/>`); });
       for (const f of X.layers.under) f(p, out, px);   // слои расширений под стенами (карта сигнала)
       out.push(`<rect x="0" y="0" width="${cm(p.W)}" height="${cm(p.H)}" fill="none" stroke="#37474f" stroke-width="${px(3)}"/>`);
@@ -583,9 +582,10 @@
       const t = ev.target;
       if (!t.matches(".nc-lay-file") || !t.files || !t.files[0]) return;
       const f = t.files[0]; t.value = "";
-      f.text().then((txt) => { tryDo(() => { const o = JSON.parse(txt), p = o.plan || (o.input && o.input.plan) || (o.rooms ? o : null);
-        if (!p) throw new Error("в файле нет планировки"); if (custom()) drop("Своя планировка заменена планировкой из файла.");
-        adopt(p, `Загружена планировка из файла «${f.name}».`); if (S.open) { S.view = "edit"; S.tab = "rooms"; S.z = 1; } changed(); }); });
+      if (f.size > LA.PLAN_JSON_MAX) { tryDo(() => { throw new Error("файл планировки слишком большой"); }); return; }
+      f.text().then((txt) => { tryDo(() => { const p = LA.parsePlanText(txt);
+        if (custom()) drop("Своя планировка заменена планировкой из файла.");
+        adopt(p, `Загружена планировка из файла «${f.name}».`); if (S.open) { S.view = "edit"; S.tab = "rooms"; S.z = 1; } changed(); }); }).catch((e) => tryDo(() => { throw e; }));
     });
     fe.addEventListener("change", (ev) => {   // поля A1–A4, B1 формы
       const n = ev.target.name;
@@ -600,8 +600,8 @@
       else if (n === "constr" || n === "L_W1") render();
     });
     try {   // своя планировка из прошлого сеанса (localStorage)
-      const o = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (o && o.plan) adopt(o.plan, "Восстановлена своя планировка, сохранённая в этом браузере.");
+      const txt = localStorage.getItem(KEY);
+      if (txt) adopt(LA.parsePlanText(txt), "Восстановлена своя планировка, сохранённая в этом браузере.");
       if (!custom()) { S.pl = null; S.note = ""; }
     } catch (e) { S.pl = null; S.note = ""; }
     S.hist = []; S.fut = []; S.knote = "";
