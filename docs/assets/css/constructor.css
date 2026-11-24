@@ -204,7 +204,7 @@ div.kq-warn{margin:.3rem 0 .5rem;padding:.3rem .6rem;border-left:.2rem solid #ef
 .kq-badge.kq-pc{background:var(--md-default-fg-color--lightest);color:var(--md-default-fg-color)}
 .kq input[type=range]{width:9rem;accent-color:var(--md-accent-fg-color)}
 .kq-imgsz{padding:.3rem .55rem;border-radius:4px;background:var(--md-default-fg-color--lightest)}
-/* вкладка «Роутер» (layout-net.js): разбор точки, слабые точки комнат, легенда карты сигнала */
+/* вкладка «Сеть» (layout-network.js): разбор точки, слабые точки комнат, легенда карты сигнала */
 .kq-why{margin:.5rem 0;padding:.4rem .6rem;border-left:3px solid #ff6d00;border-radius:4px;background:var(--md-default-fg-color--lightest)}
 .kq-why h4{margin-top:.1rem}
 .kq-why ul{margin:.2rem 0 .3rem;padding-left:1.1rem}
