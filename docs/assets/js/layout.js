@@ -10,6 +10,7 @@
   if (!NE) throw new Error("layout.js: сначала подключите engine.js");
   const GL = root.NetGlossary, q = (id) => (GL && GL.has(id) ? GL.q(id) : "");
   const EPS = 1e-6, MIN = 0.3, SNAP = 0.05, DOOR = 0.8, CLR = 0.3, STEP = 0.25;
+  const PLAN_JSON_MAX = 2 * 1024 * 1024, IMAGE_DATA_MAX = 4 * 1024 * 1024, IMAGE_FILE_MAX = 8 * 1024 * 1024;
   const eq = (a, b) => Math.abs(a - b) < EPS;
   const r4 = (v) => Math.round(v * 1e4) / 1e4;
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -294,6 +295,71 @@
   }
 
   // ---------------------------------------------------------------- проверка своей планировки
+  function planPoint(p, W, H, label) {
+    if (!Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite) || p[0] < 0 || p[1] < 0 || p[0] > W || p[1] > H) throw new Error(`${label}: неверные координаты`);
+  }
+  function planText(v, max, label) {
+    if (typeof v !== "string" || !v.trim() || v.length > max) throw new Error(`${label}: неверный текст`);
+  }
+  function validatePlan(pl) {
+    if (!pl || typeof pl !== "object" || Array.isArray(pl)) throw new Error("это не планировка квартиры");
+    if (!Number.isFinite(pl.W) || !Number.isFinite(pl.H) || pl.W < 2 || pl.H < 2 || pl.W > 100 || pl.H > 100 || pl.W * pl.H < 15 - 0.01 || pl.W * pl.H > 300 + 0.01) throw new Error("размеры квартиры должны давать площадь 15–300 м²");
+    if (!Array.isArray(pl.rooms) || !pl.rooms.length || pl.rooms.length > 64) throw new Error("неверное количество помещений");
+    let zoneCount = 0;
+    for (const rm of pl.rooms) {
+      if (!Array.isArray(rm) || rm.length !== 3) throw new Error("неверное описание помещения");
+      planText(rm[0], 80, "название помещения");
+      if (!Object.hasOwn(RNAME, rm[1])) throw new Error("неизвестный тип помещения");
+      if (!Array.isArray(rm[2]) || !rm[2].length || rm[2].length > 512) throw new Error("неверные зоны помещения");
+      zoneCount += rm[2].length;
+      if (zoneCount > 2048) throw new Error("слишком много зон помещений");
+      for (const r of rm[2]) {
+        if (!Array.isArray(r) || r.length !== 4 || !r.every(Number.isFinite) || r[0] < 0 || r[1] < 0 || r[2] > pl.W || r[3] > pl.H || r[2] <= r[0] || r[3] <= r[1]) throw new Error("зона помещения имеет неверные числовые координаты или размеры");
+      }
+    }
+    if (pl.walls !== undefined && (!Array.isArray(pl.walls) || pl.walls.length > 2000)) throw new Error("слишком много стен или неверный список");
+    for (const w of pl.walls || []) if (!Array.isArray(w) || w.length < 5 || !w.slice(0, 4).every(Number.isFinite) || !WTYPES.includes(w[4])) throw new Error("неверная стена");
+    if (pl.pos !== null && (typeof pl.pos !== "object" || Array.isArray(pl.pos))) throw new Error("неверные места узлов");
+    const P = pl.pos || {};
+    if (!Array.isArray(P.sat) || !P.sat.length || P.sat.length > 16) throw new Error("неверное количество спутников");
+    planPoint(P.entry, pl.W, pl.H, "ввод"); planPoint(P.center, pl.W, pl.H, "центральный узел");
+    for (const p of P.sat) planPoint(p, pl.W, pl.H, "спутник");
+    if (pl.door !== undefined && pl.door !== null) {
+      if (!Array.isArray(pl.door) || pl.door.length !== 2) throw new Error("неверная входная дверь");
+      planPoint(pl.door[0], pl.W, pl.H, "дверь"); planPoint(pl.door[1], pl.W, pl.H, "дверь");
+    }
+    if (pl.windows !== undefined) {
+      if (!Array.isArray(pl.windows) || pl.windows.length > 200) throw new Error("неверный список окон");
+      for (const w of pl.windows) {
+        if (!Array.isArray(w)) throw new Error("неверное окно");
+        const ps = Array.isArray(w[0]) ? w : [w.slice(0, 2), w.slice(2, 4)];
+        if (ps.length !== 2) throw new Error("неверное окно");
+        for (const p of ps) planPoint(p, pl.W, pl.H, "окно");
+      }
+    }
+    if (pl.bg !== undefined && pl.bg !== null) {
+      const b = pl.bg;
+      if (!b || typeof b !== "object" || !Number.isInteger(b.iw) || !Number.isInteger(b.ih) || b.iw < 1 || b.ih < 1 || b.iw > 1600 || b.ih > 1600 || !Array.isArray(b.m) || b.m.length !== 6 || !b.m.every((v) => Number.isFinite(v) && Math.abs(v) <= 1e6)) throw new Error("неверная привязка подложки");
+    }
+    if (pl.network !== undefined && !Array.isArray(pl.network)) throw new Error("неверный список сетевых устройств");
+    const p = clone(pl);
+    if (!Array.isArray(p.network)) p.network = defaultNetwork(p);
+    validateNetwork(p);
+    const n = normalize(p), c = check(n);
+    if (c.err.length) throw new Error("планировка не прошла проверку: " + c.err.join("; "));
+    return n;
+  }
+  function parsePlanText(txt) {
+    if (typeof txt !== "string" || txt.length > PLAN_JSON_MAX) throw new Error("файл планировки слишком большой");
+    let o; try { o = JSON.parse(txt); } catch (e) { throw new Error("файл не является корректным JSON"); }
+    const p = o && (o.plan || (o.input && o.input.plan) || (o.rooms ? o : null));
+    if (!p) throw new Error("в файле нет планировки");
+    return validatePlan(p);
+  }
+  function validateImage(img) {
+    if (!img || typeof img !== "object" || typeof img.src !== "string" || img.src.length > IMAGE_DATA_MAX || !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(img.src) || !Number.isInteger(img.iw) || !Number.isInteger(img.ih) || img.iw < 1 || img.ih < 1 || img.iw > 1600 || img.ih > 1600) throw new Error("небезопасный формат или размер картинки");
+    return { src: img.src, iw: img.iw, ih: img.ih, name: String(img.name || "план").slice(0, 200) };
+  }
   function check(pl) {
     const err = [], warn = [];
     if (!pl || !Array.isArray(pl.rooms) || !pl.rooms.length || !(pl.W > 0) || !(pl.H > 0)) return { err: ["нет помещений или размеров контура"], warn };
@@ -615,23 +681,23 @@
     return [x, y];
   }
   function validateNetwork(pl) {
-    const ids = new Set();
-    for (const d of pl.network || []) {
-      if (!d || !DEV_NAME[d.type]) throw new Error("неизвестный тип сетевого устройства");
-      if (!d.id || ids.has(d.id)) throw new Error("ID устройств должны быть уникальными");
-      ids.add(d.id);
-      if (!String(d.name || "").trim()) throw new Error("укажите название устройства");
-      if (!Array.isArray(d.pos) || d.pos[0] < 0 || d.pos[1] < 0 || d.pos[0] > pl.W || d.pos[1] > pl.H) throw new Error("устройство вне квартиры");
+    if (!Array.isArray(pl.network) || !pl.network.length || pl.network.length > 64) throw new Error("неверное количество сетевых устройств");
+    const byId = new Map();
+    for (const d of pl.network) {
+      if (!d || typeof d !== "object" || !Object.hasOwn(DEV_NAME, d.type)) throw new Error("неизвестный тип сетевого устройства");
+      if (typeof d.id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(d.id) || byId.has(d.id)) throw new Error("ID устройств должны быть уникальными");
+      planText(d.name, 40, "название устройства"); planPoint(d.pos, pl.W, pl.H, "устройство");
       if (!Number.isInteger(d.ports) || d.ports < 1 || d.ports > 64) throw new Error("число портов должно быть от 1 до 64");
       if (!Number.isFinite(d.poe) || d.poe < 0 || d.poe > 1000) throw new Error("бюджет PoE должен быть от 0 до 1000 Вт");
-      if (d.uplink !== null && d.uplink !== "entry" && !ids.has(d.uplink) && !(pl.network || []).some((x) => x.id === d.uplink)) throw new Error("uplink указывает на отсутствующее устройство");
+      if (d.uplink !== null && d.uplink !== "entry" && (typeof d.uplink !== "string" || !byId.has(d.uplink) && !pl.network.some((x) => x && x.id === d.uplink))) throw new Error("uplink указывает на отсутствующее устройство");
       if (d.uplink === d.id) throw new Error("устройство не может подключено к самому себе");
+      byId.set(d.id, d);
     }
-    for (const d of pl.network || []) {
+    for (const d of pl.network) {
       const seen = new Set(); let cur = d;
       while (cur && cur.uplink && cur.uplink !== "entry") {
         if (seen.has(cur.id)) throw new Error("в соединениях устройств есть цикл");
-        seen.add(cur.id); cur = (pl.network || []).find((x) => x.id === cur.uplink);
+        seen.add(cur.id); cur = byId.get(cur.uplink);
         if (!cur) throw new Error("uplink указывает на отсутствующее устройство");
       }
     }
@@ -679,7 +745,8 @@
     setRoom, setWall, addWall, insertDoor, autoPos, roomAt, check, draw, entryOf, nsatOf, finish, RT, WTYPES, MIN, SNAP, DOOR,
     mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, carveShape, shapeRects, pieces, setPieces, doorIn, badRooms,
     outerAt, addWindow, windowAt, moveWindow, resizeWindow, winSeg, winPoints, bgAt, bgFit, frameSize, RNAME, WALL, WNAME, RF, STEP,
-    DEV_NAME, defaultNetwork, addDevice, updateDevice, moveDevice, removeDevice, deviceAt, validateNetwork,
+    DEV_NAME, defaultNetwork, addDevice, updateDevice, moveDevice, removeDevice, deviceAt, validateNetwork, validatePlan, parsePlanText, validateImage,
+    PLAN_JSON_MAX, IMAGE_FILE_MAX,
     init: (PLD) => { PL_DATA = PLD; },
     _: { EPS, eq, r4, clone, esc, fm, q, wname, area, big, mkW, onLine, segDist } };   // для layout-ui.js
   root.NetLayout = api;

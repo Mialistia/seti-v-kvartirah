@@ -141,7 +141,7 @@
         const links = (p.network || []).filter((d) => d.uplink === sel.id).length;
         h.push(`<h4>Свойства: ${esc(sel.name)}</h4>`,
           `<div class="kq-f"><label>Название <input type="text" class="kq-devname" maxlength="40" value="${esc(sel.name)}"></label></div>`,
-          `<div class="kq-f"><label>Порты <input type="number" class="kq-devports" min="1" max="64" step="1" value="${sel.ports}"></label><label>PoE, Вт <input type="number" class="kq-devpoe" min="0" max="1000" step="5" value="${sel.poe}"></label></div>`,
+          `<div class="kq-f"><label>Порты <input type="number" class="kq-devports" min="1" max="64" step="1" value="${esc(sel.ports)}"></label><label>PoE, Вт <input type="number" class="kq-devpoe" min="0" max="1000" step="5" value="${esc(sel.poe)}"></label></div>`,
           `<div class="kq-f"><label>Uplink <select class="kq-devuplink"><option value="entry"${sel.uplink === "entry" ? " selected" : ""}>ввод провайдера</option>${(p.network || []).filter((d) => d.id !== sel.id).map((d) => `<option value="${esc(d.id)}"${sel.uplink === d.id ? " selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label></div>`,
           `<p class="kq-note">Занято портов uplink: ${links}. Доступно: ${Math.max(0, sel.ports - links)}.</p>`,
           `<p>${B("devremove", "Убрать устройство")} ${B("unsel", "Снять выделение")}</p>`);
