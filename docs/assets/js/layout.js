@@ -30,10 +30,11 @@
   function fromTemplate(PLD, cls, S) {
     const code = NE.PLAN_OF[cls], pl = PLD.plans[code], k = S ? Math.sqrt(S / pl.area) : 1, sc = (v) => r4(v * k), pt = (p) => p.map(sc);
     const W = sc(pl.W), H = sc(pl.H);
-    return { v: 1, cls, base: code, title: pl.title, W, H, area: W * H, auto: false,
+    const out = { v: 1, cls, base: code, title: pl.title, W, H, area: W * H, auto: false,
       rooms: pl.rooms.map(([n, t, rs]) => [n, t, rs.map((r) => r.map(sc))]), walls: pl.walls.map((w) => w.slice(0, 4).map(sc).concat(w[4])),
       pos: { entry: pt(pl.pos.entry), center: pt(pl.pos.center), sat: pl.pos.sat.map(pt) },
       door: (pl.door || []).map(pt), windows: (pl.windows || []).map((w) => w.map(pt)) };
+    out.network = defaultNetwork(out); return out;
   }
   function doorOn(W, H, side, off) {   // входная дверь DOOR м на стороне контура, off — отступ от угла
     const L = side === "лево" || side === "право" ? H : W, a = r4(Math.max(0, Math.min(+off || 0, L - DOOR))), b = r4(a + DOOR);
@@ -44,6 +45,7 @@
     const pl = { v: 1, cls, base: null, title: "Своя планировка", W, H, area: W * H, auto: true, rooms: [["Комната 1", "ж", [[0, 0, W, H]]]], walls: [],
       pos: null, door: doorOn(W, H, side, off), windows: [] };
     pl.pos = autoPos(pl, nsatOf(PLD, cls), PLD.WT);
+    pl.network = defaultNetwork(pl);
     return pl;
   }
   function rescale(pl0, S) {   // своя планировка под новую площадь A2: пропорции сохраняются
@@ -52,11 +54,12 @@
     for (const rm of pl.rooms) rm[2] = rm[2].map((r) => r.map(sc));
     pl.walls = pl.walls.map((w) => w.slice(0, 4).map(sc).concat(w[4]));
     pl.pos = { entry: pt(pl.pos.entry), center: pt(pl.pos.center), sat: pl.pos.sat.map(pt) };
+    pl.network = (pl.network || defaultNetwork(pl)).map((d) => ({ ...d, pos: pt(d.pos) }));
     pl.door = (pl.door || []).map(pt); pl.windows = (pl.windows || []).map((w) => winPoints(w).map(pt));
     if (pl.bg && pl.bg.m) pl.bg = { ...pl.bg, m: pl.bg.m.map((v) => v * k) };
     return pl;
   }
-  const same = (a, b) => !!a && !!b && JSON.stringify([a.rooms, a.walls, a.pos, a.windows, a.door, a.W, a.H]) === JSON.stringify([b.rooms, b.walls, b.pos, b.windows, b.door, b.W, b.H]);
+  const same = (a, b) => !!a && !!b && JSON.stringify([a.rooms, a.walls, a.pos, a.windows, a.door, a.network, a.W, a.H]) === JSON.stringify([b.rooms, b.walls, b.pos, b.windows, b.door, b.network, b.W, b.H]);
 
   // ---------------------------------------------------------------- отрезки, границы помещений, прямые
   // отрезок на прямой: o — "v" (x = c) или "h" (y = c), [a, b] — вдоль прямой
@@ -181,6 +184,7 @@
       rm[2] = rs;
     }
     pl.rooms = pl.rooms.filter((rm) => rm[2].length);
+    if (!Array.isArray(pl.network) && pl.pos) pl.network = defaultNetwork(pl);
     pl.area = pl.W * pl.H;
     return pl;
   }
@@ -235,7 +239,12 @@
     return finish(pl);
   }
   let PL_DATA = null;   // plans.json — для автоматической расстановки узлов (finish)
-  function finish(pl) { if (pl.auto && PL_DATA) pl.pos = autoPos(pl, pl.pos ? pl.pos.sat.length : nsatOf(PL_DATA, pl.cls), PL_DATA.WT, !!pl.base); return pl; }
+  function finish(pl) {
+    if (pl.auto && PL_DATA) pl.pos = autoPos(pl, pl.pos ? pl.pos.sat.length : nsatOf(PL_DATA, pl.cls), PL_DATA.WT, !!pl.base);
+    const main = (pl.network || []).find((d) => d.id === "R1");
+    if (main && !pl.manual) main.pos = pl.pos.center.slice();
+    return pl;
+  }
 
   // ---------------------------------------------------------------- места узлов по правилам размещения (Ш6)
   function segDist(p, w) {
@@ -393,6 +402,7 @@
     for (const rm of pl.rooms) rm[2] = rm[2].map(R);
     pl.walls = pl.walls.map((w) => P([w[0], w[1]]).concat(P([w[2], w[3]]), [w[4]]));
     if (pl.pos) pl.pos = { entry: P(pl.pos.entry), center: P(pl.pos.center), sat: pl.pos.sat.map(P) };
+    pl.network = (pl.network || defaultNetwork(pl)).map((d) => ({ ...d, pos: P(d.pos) }));
     pl.door = (pl.door || []).map(P); pl.windows = (pl.windows || []).map((w) => winPoints(w).map(P));
     if (pl.bg && pl.bg.m) pl.bg = bgMap(pl.bg, f);
     return normalize(pl);
@@ -591,6 +601,74 @@
     const pl = clone(pl0), s = winSeg(pl.windows[wi]); if (!s) throw new Error("окно не найдено");
     return moveWindow(pl, wi, (s.a + s.b) / 2, width);
   }
+  const DEV_NAME = { router: "Роутер", switch: "Коммутатор", ap: "Точка доступа" };
+  function defaultNetwork(pl) {
+    return [{ id: "R1", type: "router", name: "Роутер", pos: pl.pos.center.slice(), ports: 4, poe: 0, uplink: "entry" }];
+  }
+  function nextDeviceId(pl) {
+    let i = 1; while (pl.network.some((d) => d.id === `D${i}`)) i++; return `D${i}`;
+  }
+  function devicePos(pl, p) {
+    if (!Array.isArray(p) || p.length < 2 || !p.every(Number.isFinite)) throw new Error("неверные координаты устройства");
+    const x = r4(Math.min(pl.W - 0.1, Math.max(0.1, Math.round(p[0] / SNAP) * SNAP)));
+    const y = r4(Math.min(pl.H - 0.1, Math.max(0.1, Math.round(p[1] / SNAP) * SNAP)));
+    return [x, y];
+  }
+  function validateNetwork(pl) {
+    const ids = new Set();
+    for (const d of pl.network || []) {
+      if (!d || !DEV_NAME[d.type]) throw new Error("неизвестный тип сетевого устройства");
+      if (!d.id || ids.has(d.id)) throw new Error("ID устройств должны быть уникальными");
+      ids.add(d.id);
+      if (!String(d.name || "").trim()) throw new Error("укажите название устройства");
+      if (!Array.isArray(d.pos) || d.pos[0] < 0 || d.pos[1] < 0 || d.pos[0] > pl.W || d.pos[1] > pl.H) throw new Error("устройство вне квартиры");
+      if (!Number.isInteger(d.ports) || d.ports < 1 || d.ports > 64) throw new Error("число портов должно быть от 1 до 64");
+      if (!Number.isFinite(d.poe) || d.poe < 0 || d.poe > 1000) throw new Error("бюджет PoE должен быть от 0 до 1000 Вт");
+      if (d.uplink !== null && d.uplink !== "entry" && !ids.has(d.uplink) && !(pl.network || []).some((x) => x.id === d.uplink)) throw new Error("uplink указывает на отсутствующее устройство");
+      if (d.uplink === d.id) throw new Error("устройство не может подключено к самому себе");
+    }
+    for (const d of pl.network || []) {
+      const seen = new Set(); let cur = d;
+      while (cur && cur.uplink && cur.uplink !== "entry") {
+        if (seen.has(cur.id)) throw new Error("в соединениях устройств есть цикл");
+        seen.add(cur.id); cur = (pl.network || []).find((x) => x.id === cur.uplink);
+        if (!cur) throw new Error("uplink указывает на отсутствующее устройство");
+      }
+    }
+    return pl;
+  }
+  function addDevice(pl0, type, pos, opts = {}) {
+    if (!DEV_NAME[type]) throw new Error("тип устройства: router, switch или ap");
+    const pl = clone(pl0); pl.network = Array.isArray(pl.network) ? pl.network : defaultNetwork(pl);
+    const id = opts.id || nextDeviceId(pl), count = pl.network.filter((d) => d.type === type).length + 1;
+    const uplink = opts.uplink !== undefined ? opts.uplink : type === "router" ? "entry" : ((pl.network.find((d) => d.type === (type === "ap" ? "switch" : "router")) || {}).id || "entry");
+    const ports = opts.ports !== undefined ? +opts.ports : type === "switch" ? 8 : type === "router" ? 4 : 1;
+    const poe = opts.poe !== undefined ? +opts.poe : 0;
+    pl.network.push({ id, type, name: String(opts.name || `${DEV_NAME[type]}${count > 1 ? " " + count : ""}`).trim().slice(0, 40), pos: devicePos(pl, pos), ports, poe, uplink });
+    return validateNetwork(pl);
+  }
+  function updateDevice(pl0, id, patch = {}) {
+    const pl = clone(pl0), d = (pl.network || []).find((x) => x.id === id); if (!d) throw new Error("устройство не найдено");
+    if (patch.name !== undefined) d.name = String(patch.name).trim().slice(0, 40);
+    if (patch.type !== undefined) { if (!DEV_NAME[patch.type]) throw new Error("неизвестный тип устройства"); d.type = patch.type; }
+    if (patch.pos !== undefined) d.pos = devicePos(pl, patch.pos);
+    if (patch.ports !== undefined) d.ports = +patch.ports;
+    if (patch.poe !== undefined) d.poe = +patch.poe;
+    if (patch.uplink !== undefined) d.uplink = patch.uplink;
+    return validateNetwork(pl);
+  }
+  function moveDevice(pl0, id, pos) { return updateDevice(pl0, id, { pos }); }
+  function removeDevice(pl0, id) {
+    const pl = clone(pl0); if (!(pl.network || []).some((d) => d.id === id)) throw new Error("устройство не найдено");
+    pl.network = pl.network.filter((d) => d.id !== id);
+    for (const d of pl.network) if (d.uplink === id) d.uplink = "entry";
+    return validateNetwork(pl);
+  }
+  function deviceAt(pl, pt, tol = 0.25) {
+    let best = null;
+    for (const d of pl.network || []) { const dist = Math.hypot(d.pos[0] - pt[0], d.pos[1] - pt[1]); if (dist <= tol && (!best || dist < best.d)) best = { d, id: d.id, dist }; }
+    return best && best.d;
+  }
   function badRooms(pl) {   // помещения меньше клетки расчётной сетки — для подсветки на плане
     const bad = new Set();
     pl.rooms.forEach(([, , rs], i) => { if (!rs.some((r) => r[0] + STEP / 2 < r[2] && r[1] + STEP / 2 < r[3])) bad.add(i); });
@@ -601,6 +679,7 @@
     setRoom, setWall, addWall, insertDoor, autoPos, roomAt, check, draw, entryOf, nsatOf, finish, RT, WTYPES, MIN, SNAP, DOOR,
     mirror, rotate, stretch, setDoor, doorSide, doorOn, roomEdges, moveEdge, roomSize, snapRect, carve, carveShape, shapeRects, pieces, setPieces, doorIn, badRooms,
     outerAt, addWindow, windowAt, moveWindow, resizeWindow, winSeg, winPoints, bgAt, bgFit, frameSize, RNAME, WALL, WNAME, RF, STEP,
+    DEV_NAME, defaultNetwork, addDevice, updateDevice, moveDevice, removeDevice, deviceAt, validateNetwork,
     init: (PLD) => { PL_DATA = PLD; },
     _: { EPS, eq, r4, clone, esc, fm, q, wname, area, big, mkW, onLine, segDist } };   // для layout-ui.js
   root.NetLayout = api;

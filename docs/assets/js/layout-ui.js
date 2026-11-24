@@ -1,4 +1,4 @@
-// Конструктор квартиры — блок «Планировка» в форме калькулятора (A2–A4).
+// Планировщик квартиры — блок «Планировка» в форме калькулятора (A2–A4).
 // В форме — мини-план, строка состояния и кнопки; конструктор открывается поверх страницы на весь экран:
 // старт («Похожа на типовую» К1–К5, «С нуля», «Открыть сохранённую»), вкладки «Комнаты» (край комнаты тянется кружком — соседние
 // подстраиваются; размеры числом; тип, деление, объединение; новая комната обводкой прямоугольником; отражение, поворот, ширина квартиры,
@@ -100,7 +100,7 @@
       lastFocus = document.activeElement;
       if (!K) {
         K = document.createElement("div"); K.className = "kq"; K.tabIndex = -1;
-        K.setAttribute("role", "dialog"); K.setAttribute("aria-modal", "true"); K.setAttribute("aria-label", "Конструктор квартиры");
+        K.setAttribute("role", "dialog"); K.setAttribute("aria-modal", "true"); K.setAttribute("aria-label", "Планировщик квартиры");
         document.body.appendChild(K); bindK();
       }
       S.open = true; S.view = view || (custom() ? "edit" : "start"); S.sel = null; S.draw = false; S.more = false; S.z = 1; S.knote = S.note || "";
@@ -115,7 +115,7 @@
       const b = $h('[data-act="open"].nc-lay-b'); if (b) b.focus({ preventScroll: true }); else if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
     }
     const $k = (s) => K.querySelector(s);
-    // точки расширения: layout-img.js (по картинке), layout-net.js (роутер) — подключаются после этого файла, до calc.js
+    // точки расширения: layout-img.js (по картинке), layout-tools.js (проёмы, экспорт), layout-network.js (сеть и покрытие)
     const X = { S, F, PLD, opts, LA, NE, host, B, FB, IC, SIDES, RSHORT, num, r2, cm, $k, $h, K: () => K, paint: () => paint(), stage: (l) => stage(l), render: () => render(),
       commit: (np, sel) => commit(np, sel), changed: () => changed(), tryDo, drop: (w) => drop(w), curCls, areaNow, typ, vb: (p) => vb(p), geo, custom,
       tabs: [["rooms", "Комнаты"], ["walls", "Стены"]], views: {}, tab: {}, drags: {}, acts: {}, cards: [], planSide: [], onChange: [], onInput: [], layers: { under: [], over: [] } };
@@ -128,7 +128,7 @@
     }
     function topHtml() {
       const editing = S.view === "edit";
-      return `<div class="kq-top"><div class="kq-brand"><b class="kq-title">Конструктор<span class="kq-t"> квартиры</span></b>${S.pl ? `<span class="kq-project">${esc(S.pl.base || S.pl.title || "Своя планировка")}</span>` : ""}</div>` +
+      return `<div class="kq-top"><div class="kq-brand"><b class="kq-title">Планировщик<span class="kq-t"> квартиры</span></b>${S.pl ? `<span class="kq-project">${esc(S.pl.base || S.pl.title || "Своя планировка")}</span>` : ""}</div>` +
         `<span class="kq-stat" role="status" aria-live="polite"></span><span class="kq-tools">` +
         (editing ? B("undo", IC.undo, ' title="Отменить (Ctrl+Z)" aria-label="Отменить"') + B("redo", IC.redo, ' title="Повторить (Ctrl+Y)" aria-label="Повторить"') : "") +
         B("restart", "Новый проект") + B("ksave", "Сохранить", custom() ? "" : " disabled") + B("more", "⋯", ' aria-haspopup="true" aria-label="Ещё"') + B("done", "Готово", ' data-main="1"') +
@@ -145,7 +145,10 @@
           `<span class="kq-snap">привязка 5 см</span><span class="kq-scale"></span></div>`;
         const stage = (label) => `<div class="kq-stage"><div class="kq-stagebar"><span class="kq-mode">${esc(label)}</span><div class="kq-selbar" aria-label="Действия с выбранным объектом"></div></div>` +
           `<div class="kq-cv" aria-label="План квартиры" role="img"></div><p class="kq-hint"></p>${zoom}${bottom}</div>`;
-        const rail = `<nav class="kq-rail" role="tablist" aria-label="Инструменты">${X.tabs.map(([t, n]) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}"><span class="kq-tab-ic">${t === "rooms" ? "▦" : t === "walls" ? "┃" : t === "openings" ? "◉" : "⌁"}</span><span>${n}</span></button>`).join("")}</nav>`;
+        const tool = (t, n, ic) => `<button type="button" role="tab" class="kq-tab" data-act="tab" data-t="${t}" aria-selected="${S.tab === t}"><span class="kq-tab-ic">${ic}</span><span>${n}</span></button>`;
+        const rail = `<nav class="kq-rail" role="tablist" aria-label="Инструменты"><div class="kq-rail-title">Планировка</div>` +
+          tool("rooms", "Комнаты", "▦") + tool("walls", "Стены", "┃") + tool("openings", "Проёмы", "◉") +
+          `<div class="kq-rail-title">Оборудование</div>` + tool("net", "Сеть", "⌁") + `</nav>`;
         K.innerHTML = topHtml() + (S.view === "start" ? `<div class="kq-start"></div>` : X.views[S.view] ?
           `<div class="kq-workspace kq-single"><div class="kq-main">${stage(X.views[S.view].label || "Рисунок")}<aside class="kq-side"></aside></div></div>` :
           `<div class="kq-workspace">${rail}<div class="kq-main">${stage((X.tab[S.tab] && X.tab[S.tab].label) || (X.tabs.find(([t]) => t === S.tab) || [])[1] || "План")}<aside class="kq-side"></aside></div></div>`);
@@ -180,6 +183,10 @@
         return `<b>${pc ? esc(wname(pc.t || "Без стены")) : "Стена"}</b>${pc && pc.t && pc.t !== "W4" && pc.b - pc.a >= DOOR + 0.1 - EPS ? B("door", "Дверь", ' aria-label="Добавить дверь в выбранный участок"') : ""}${close}`;
       }
       if (S.sel.k === "window") return `<b>Окно ${S.sel.wi + 1}</b>${close}`;
+      if (S.sel.k === "device") {
+        const d = (S.pl.network || []).find((x) => x.id === S.sel.id);
+        return d ? `<b>${esc(d.name)}</b>${B("devremove", "Убрать", ' aria-label="Убрать сетевое устройство"')}${close}` : "";
+      }
       return "";
     }
 
@@ -289,8 +296,11 @@
       if (P) {
         const rr = Math.max(14, px(7));
         out.push(`<g class="kq-pos"><rect x="${cm(P.entry[0]) - rr * 0.8}" y="${cm(P.entry[1]) - rr * 0.8}" width="${rr * 1.6}" height="${rr * 1.6}" fill="#fff" stroke="#e65100" stroke-width="${rr / 4}"/>`);
-        [P.center].concat(P.sat).forEach((c, i) => out.push(`<circle cx="${cm(c[0])}" cy="${cm(c[1])}" r="${rr}" fill="${i ? "#00897b" : "#283593"}" fill-opacity=".85" stroke="#fff" stroke-width="${rr / 4}"/>` +
-          `<text x="${cm(c[0])}" y="${cm(c[1])}" class="kq-node" style="font-size:${rr * 1.1}px">${i ? "С" + i : "Ц"}</text>`));
+        [P.center].concat(P.sat).forEach((c, i) => {
+          if (S.tab === "net" && i === 0 && (p.network || []).some((d) => d.id === "R1")) return;
+          out.push(`<circle cx="${cm(c[0])}" cy="${cm(c[1])}" r="${rr}" fill="${i ? "#00897b" : "#283593"}" fill-opacity=".85" stroke="#fff" stroke-width="${rr / 4}"/>` +
+            `<text x="${cm(c[0])}" y="${cm(c[1])}" class="kq-node" style="font-size:${rr * 1.1}px">${i ? "С" + i : "Ц"}</text>`);
+        });
         out.push("</g>");
       }
       if (selR >= 0 && !S.draw) for (const e of LA.roomEdges(p, selR)) {   // кружки
