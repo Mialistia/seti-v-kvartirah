@@ -63,9 +63,7 @@ jobs:
           node --check docs/assets/js/layout-tools.js
           node --check docs/assets/js/layout-net.js
           node --check docs/assets/js/tables.js
-          node tests/engine.test.mjs
-          node tests/calc.test.mjs
-          node tests/equipment.test.mjs
+          node --test tests/*.test.mjs
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - name: Сборка MkDocs
