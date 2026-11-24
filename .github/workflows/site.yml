@@ -9,18 +9,26 @@ on:
   schedule: [{cron: "0 * * * *"}]   # каждый час
   workflow_dispatch:                 # кнопка «Run workflow»
   push: {branches: [main]}
-permissions: {contents: write, pages: write, id-token: write}
-concurrency: {group: pages, cancel-in-progress: true}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: {name: github-pages, url: "${{ steps.deploy.outputs.page_url }}"}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     env:
       FROM_NOTION: ${{ vars.CONTENT_SOURCE != 'github' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
-        if: env.FROM_NOTION == 'true'
         with: {node-version: 22}
       - name: Выгрузка из Notion
         if: env.FROM_NOTION == 'true'
@@ -35,7 +43,7 @@ jobs:
         run: |
           git config user.name "notion-sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A docs mkdocs.yml
+          git add docs mkdocs.yml
           if git diff --cached --quiet; then
             echo "Страницы не отличаются от main"
           else
@@ -43,33 +51,44 @@ jobs:
           fi
           # notion-content = текущий main + последний снимок Notion (перезаписывается каждый час)
           git push --force origin HEAD:refs/heads/notion-content
+      - name: Проверка калькулятора
+        run: |
+          node --check docs/assets/js/engine.js
+          node --check docs/assets/js/calc.js
+          node --check docs/assets/js/glossary.js
+          node --check docs/assets/js/plan.js
+          node --check docs/assets/js/layout.js
+          node --check docs/assets/js/layout-ui.js
+          node --check docs/assets/js/layout-img.js
+          node --check docs/assets/js/layout-tools.js
+          node --check docs/assets/js/layout-net.js
+          node --check docs/assets/js/tables.js
+          node tests/engine.test.mjs
+          node tests/calc.test.mjs
+          node tests/equipment.test.mjs
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
-      - run: pip install mkdocs-material && mkdocs build
-      - uses: actions/upload-pages-artifact@v4
-        with: {path: site}
-      - name: Дождаться доступности артефакта Pages
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Сборка MkDocs
         run: |
-          for attempt in $(seq 1 12); do
-            count=0
-            if response=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100"); then
-              count=$(jq '[.artifacts[] | select(.name == "github-pages")] | length' <<< "$response")
-            fi
-            if [ "$count" -eq 1 ]; then
-              echo "Артефакт github-pages доступен"
-              exit 0
-            fi
-            if [ "$count" -gt 1 ]; then
-              echo "Ошибка: несколько артефактов github-pages в одном запуске" >&2
-              exit 1
-            fi
-            echo "Артефакт ещё не виден API (попытка $attempt/12)"
-            sleep 5
-          done
-          echo "Ошибка: артефакт github-pages не появился в API" >&2
-          exit 1
-      - id: deploy
-        uses: actions/deploy-pages@v4
+          pip install mkdocs-material
+          mkdocs build --strict
+      - name: Настроить GitHub Pages
+        uses: actions/configure-pages@v6
+      - name: Загрузить артефакт Pages
+        uses: actions/upload-pages-artifact@v5
+        with: {path: site}
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Публикация GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
