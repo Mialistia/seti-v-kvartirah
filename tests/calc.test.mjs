@@ -84,6 +84,7 @@ const prem = UI.pick(r, UI.pvButtons(r)[2].key, "prem");
 assert.equal(prem.x.name, "SNR AX2");
 assert.equal((UI.planSvg(prem.P, prem.x).match(/<circle /g) || []).length, prem.x.n);
 assert.ok(UI.planView(r, prem).startsWith('<p class="nc-pv-cost"><small><b>Премиум</b> — SNR AX2'), "строка стоимости — для выбранного варианта");
+assert.match(UI.planView(r, prem), /Карта пересчитывается для выбранной модели/, "план объясняет, почему карты моделей могут совпадать");
 // легенда стен: образцы для каждого типа стены плана и потери на 5 ГГц (И2, табл. 4)
 for (const t of new Set(r.geom.walls.map((w) => w[4]).filter((t) => t !== "O"))) assert.ok(r.geom.wt[t] && html.includes(`— <b>${String(r.geom.wt[t][1]).replace(".", ",")} дБ</b>`), `легенда: стена ${t}`);
 assert.match(html, /несущая ж\/б — <b>13 дБ<\/b>/);

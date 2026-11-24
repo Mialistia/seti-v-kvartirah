@@ -197,7 +197,7 @@
         `TCO 5 лет ${rub(o.tco)}${q("tco")}, ${f(o.rub_m2)} ₽/м²${q("rubm2")}; запас к KPI${q("margin")}: P<sub>z</sub> ${sg(o.margin.Pz, 1)} дБ, TCP × ${f(o.margin.TCP, 2)}, ёмкость C${q("c")} × ${f(o.margin.C, 2)}.` +
         `${s.m === "own" && R.kt.best ? " Рекомендация не меняется — это просмотр другого варианта." : ""}</small></p>`);
     }
-    h.push(`<div class="nc-planbox">${planSvg(P, o)}</div>`, legend(R, o));
+    h.push(`<div class="nc-planbox">${planSvg(P, o)}</div>`, `<p class="nc-note">Карта пересчитывается для выбранной модели. Она зависит от ЭИИМ, схемы и размещения узлов; при одинаковых радиопараметрах карты моделей совпадают.</p>`, legend(R, o));
     if (o) {
       h.push(`<h3>Размещение, частоты, кабель (Ш6–Ш8)</h3>`);
       h.push(table([`Узел${q("node")}`, "Роль", "Координаты, м", "Помещение"], o.aps.map((p, i) => [String(i + 1), esc(P.sh6.roles[i]), `${f(p[0], 2)}; ${f(p[1], 2)}`, esc(roomAt(R.geom, p))])));
