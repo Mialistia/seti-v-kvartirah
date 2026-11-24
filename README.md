@@ -6,8 +6,8 @@
 
 | Путь | Что это |
 |---|---|
-| `.github/workflows/site.yml` | синхронизация из Notion (каждый час и после слияния), сборка, публикация |
-| `.github/workflows/check.yml` | проверка сборки для каждого pull request |
+| `.github/workflows/site.yml` | синхронизация из Notion (каждый час и после слияния), отдельные jobs сборки и публикации Pages |
+| `.github/workflows/check.yml` | проверка сборки и структуры Pages workflow для каждого pull request |
 | `.github/workflows/backup.yml` | резервная копия: тег `backup-…` и выпуск с архивами |
 | `tests/engine.test.mjs` | 31 контрольный пример методики И4: расчёт сверяется с эталоном на Python |
 | `tests/calc.test.mjs`, `tests/equipment.test.mjs` | проверки формы и вывода калькулятора; выгрузки и каталога оборудования |

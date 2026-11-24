@@ -40,6 +40,23 @@ jobs:
         run: node tests/equipment.test.mjs
       - name: Сборка MkDocs
         run: pip install mkdocs-material && mkdocs build
+      - name: Проверка workflow Pages
+        run: |
+          python - <<'PY'
+          import yaml
+          with open('.github/workflows/site.yml', encoding='utf-8') as f:
+              workflow = yaml.safe_load(f)
+          jobs = workflow['jobs']
+          assert set(jobs) == {'build', 'deploy'}, 'нужны отдельные jobs build и deploy'
+          assert jobs['deploy']['needs'] == 'build', 'deploy должен ждать build'
+          assert workflow['concurrency']['cancel-in-progress'] is False, 'не отменять публикацию на полпути'
+          build_steps = jobs['build']['steps']
+          assert not any('deploy-pages' in str(step) for step in build_steps), 'deploy не должен быть в build'
+          assert any('configure-pages@v6' in str(step) for step in build_steps), 'нужен configure-pages@v6'
+          assert any('upload-pages-artifact@v5' in str(step) for step in build_steps), 'нужен upload-pages-artifact@v5'
+          assert any('deploy-pages@v5' in str(step) for step in jobs['deploy']['steps']), 'нужен deploy-pages@v5'
+          print('Workflow Pages: раздельные build/deploy, версии и permissions корректны')
+          PY
       - name: Итог
         run: |
           test -f site/index.html
