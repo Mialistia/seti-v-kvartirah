@@ -118,7 +118,7 @@
     function side(p) {
       const h = [], v = S.net.coverage ? pv(p) : null;
       h.push(`<h3>Сетевое оборудование</h3><div class="kq-chips" role="group" aria-label="Тип устройства">${types.map(([k, n]) => `<button type="button" class="kq-chip" data-act="devtype" data-t="${k}" aria-pressed="${S.net.deviceType === k}">${n}</button>`).join("")}</div>`);
-      h.push(`<p class="kq-note">Нажмите на план, чтобы добавить устройство. R — основной роутер, SW — коммутатор, AP — точка доступа. Линии показывают uplink.</p>`);
+      h.push(`<p class="kq-note">Нажмите на план, чтобы добавить устройство. R — основной роутер, SW — коммутатор, AP — точка доступа. Линии показывают uplink.</p><p>${B("devadd", "Добавить в центр комнаты")}</p>`);
       h.push(`<h4>Покрытие 5 ГГц</h4><label class="kq-chk"><input type="checkbox" class="kq-coverage"${S.net.coverage ? " checked" : ""}> показать поле покрытия</label>`);
       h.push(`<div class="kq-chips" role="group" aria-label="Активные узлы">${[["all", "Все узлы"], ["center", "Только Ц"], ["entry", "У ввода"]].map(([k, n]) => `<button type="button" class="kq-chip" data-act="netmode" data-t="${k}" aria-pressed="${S.net.mode === k}">${n}</button>`).join("")}</div>`);
       if (v) {
@@ -151,6 +151,12 @@
     }
 
     X.acts.devtype = (b) => { S.net.deviceType = b.dataset.t; X.paint(); };
+    X.acts.devadd = () => {
+      let ri = S.sel && S.sel.k === "room" ? S.sel.ri : LA.roomAt(S.pl, [S.pl.W / 2, S.pl.H / 2]);
+      if (ri < 0 || !S.pl.rooms[ri]) ri = 0;
+      const r = S.pl.rooms[ri][2][0], pt = [(r[0] + r[2]) / 2, (r[1] + r[3]) / 2], np = LA.addDevice(X.geo(S.pl), S.net.deviceType, pt), d = np.network[np.network.length - 1];
+      X.commit(np, { k: "device", id: d.id }); S.knote = `${d.name} добавлен в центр комнаты.`; X.paint();
+    };
     X.acts.devpick = (b) => { S.sel = { k: "device", id: b.dataset.id }; X.paint(); };
     X.acts.devremove = () => { const sel = S.sel; if (sel && sel.k === "device") { X.commit(LA.removeDevice(S.pl, sel.id)); S.sel = null; S.knote = "Устройство убрано, соединения перепривязаны к вводу."; X.paint(); } };
     X.acts.netmode = (b) => { S.net.mode = b.dataset.t; X.paint(); };
