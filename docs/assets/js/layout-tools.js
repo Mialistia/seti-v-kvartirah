@@ -61,6 +61,7 @@
         `<button type="button" class="kq-chip" data-act="optool" data-t="door" aria-pressed="${S.openTool === "door"}">Дверь</button>` +
         `<button type="button" class="kq-chip" data-act="optool" data-t="window" aria-pressed="${S.openTool === "window"}">Окно</button></div>`);
       h.push(`<p class="kq-note">${S.openTool === "window" ? "Нажмите на наружную стену — окно шириной 1,2 м. Тяните окно вдоль стены; точную ширину можно ввести ниже." : "Внутренняя стена — дверь 0,8 м. Наружная стена — входная дверь и место ввода кабеля."}</p>`);
+      h.push(`<h4>Добавить окно без мыши</h4><div class="kq-nlist">${[["h", 0, "сверху"], ["v", p.W, "справа"], ["h", p.H, "снизу"], ["v", 0, "слева"]].map(([o, c, n]) => `<button type="button" class="kq-chip" data-act="winadd" data-o="${o}" data-c="${c}">Окно: ${n}</button>`).join("")}</div>`);
       h.push(`<h4>Окна на плане <small>· ${ws.length}</small></h4>`);
       if (!ws.length) h.push(`<p class="kq-note">Окон пока нет. Выберите «Окно» и нажмите на наружную стену.</p>`);
       else h.push(`<div class="kq-nlist">${ws.map((w, i) => `<button type="button" class="kq-chip" data-act="wpick" data-wi="${i}" aria-pressed="${i === sel}"><i class="kq-win-dot"></i>Окно ${i + 1} — ${fm(LA.winSeg(w).b - LA.winSeg(w).a)} м</button>`).join("")}</div>`);
@@ -73,6 +74,7 @@
     };
 
     X.acts.optool = (b) => { S.openTool = b.dataset.t; S.sel = null; X.paint(); };
+    X.acts.winadd = (b) => { const o = b.dataset.o, c = +b.dataset.c, len = o === "v" ? S.pl.H : S.pl.W, np = LA.addWindow(X.geo(S.pl), { outer: true, o, c, a: 0, b: len, at: len / 2 }, 1.2); X.commit(np, { k: "window", wi: np.windows.length - 1 }); S.knote = "Окно добавлено на наружную стену."; X.paint(); };
     X.acts.wpick = (b) => { S.sel = { k: "window", wi: +b.dataset.wi }; X.paint(); };
     X.acts.grid = () => { S.gridOn = !S.gridOn; X.stage(); };
     X.onChange.push((t) => {

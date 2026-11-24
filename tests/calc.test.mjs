@@ -84,6 +84,7 @@ const prem = UI.pick(r, UI.pvButtons(r)[2].key, "prem");
 assert.equal(prem.x.name, "SNR AX2");
 assert.equal((UI.planSvg(prem.P, prem.x).match(/<circle /g) || []).length, prem.x.n);
 assert.ok(UI.planView(r, prem).startsWith('<p class="nc-pv-cost"><small><b>Премиум</b> — SNR AX2'), "строка стоимости — для выбранного варианта");
+assert.match(UI.planView(r, prem), /Карта пересчитывается для выбранной модели/, "план объясняет, почему карты моделей могут совпадать");
 // легенда стен: образцы для каждого типа стены плана и потери на 5 ГГц (И2, табл. 4)
 for (const t of new Set(r.geom.walls.map((w) => w[4]).filter((t) => t !== "O"))) assert.ok(r.geom.wt[t] && html.includes(`— <b>${String(r.geom.wt[t][1]).replace(".", ",")} дБ</b>`), `легенда: стена ${t}`);
 assert.match(html, /несущая ж\/б — <b>13 дБ<\/b>/);
@@ -242,7 +243,7 @@ for (const cls of Object.keys(NE.PLAN_OF)) {
   assert.deepEqual(LA.check(cv).err, []); assert.ok(LA.same(LA.normalize(structuredClone(cv)), cv));
 }
 
-// 13. Предпросмотр сигнала в конструкторе (engine.js: preview, why; вкладка «Роутер» — layout-net.js): та же карта, что в расчёте,
+// 13. Предпросмотр сигнала в планировщике (engine.js: preview, why; вкладка «Сеть» — layout-network.js): та же карта, что в расчёте,
 // с точностью до ЭИИМ узла; разбор точки сходится с картой; расчёт И4 не меняется (31 пример — engine.test.mjs)
 {
   let n = 0;

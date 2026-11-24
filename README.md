@@ -11,6 +11,7 @@
 | `.github/workflows/backup.yml` | резервная копия: тег `backup-…` и выпуск с архивами |
 | `tests/engine.test.mjs` | 31 контрольный пример методики И4: расчёт сверяется с эталоном на Python |
 | `tests/calc.test.mjs`, `tests/equipment.test.mjs` | проверки формы и вывода калькулятора; выгрузки и каталога оборудования |
+| `tests/planner-network.test.mjs`, `tests/planner-data-safety.test.mjs`, `tests/accessibility.test.mjs`, `tests/coverage-switch.test.mjs` | сетевые объекты планировщика, безопасный импорт, доступность и пересчёт карты при смене роутера |
 | `tests/fixtures/` | эталон для тестов: примеры И4 (`cases_i4_base.json`, `cases_i4_spec.json`) и замороженный каталог `equipment_i4.json` |
 | `CHANGELOG.md` | журнал изменений |
 | `scripts/sync.mjs` | выгрузка страниц из Notion и сборка меню; выгрузка базы оборудования |
