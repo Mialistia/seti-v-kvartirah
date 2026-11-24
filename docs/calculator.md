@@ -4,7 +4,7 @@
 
 Квартира моделируется по типовому плану своего класса (И2), масштабированному по площади. Это прогноз: итог проверяется замерами «до» и «после» (блок H чек-листа, Ш11). Оборудование берётся из базы Notion «Оборудование К Телеком» — парк К Телеком и модели рынка (И3); сайт выгружает её каждый час. Своё оборудование можно добавить в блоке G3: оно рассчитывается наравне с каталогом.
 
-Блок «Планировка» в форме — карточки типовых квартир К1–К5 и «С нуля». «Изменить планировку» открывает конструктор с левой панелью инструментов, крупным холстом, сеткой и панелью свойств. Комнату можно нарисовать прямоугольной, квадратной или L-образной; стены, двери и окна добавляются прямо на плане. В инструменте «Сеть» можно разместить роутер, коммутатор или точку доступа, задать число портов, бюджет PoE и uplink, показать кабели и поле покрытия 5 ГГц. Стену можно перетащить мышью или пальцем (на телефоне — сначала коснитесь стены) или сдвинуть кнопками и стрелками клавиатуры с шагом 5 см; помещение — разделить стеной (с дверью или без), объединить с соседним, переименовать, сменить тип; у участка стены — сменить тип (потери — по И2, табл. 4), вставить дверь или удалить его. «С нуля» — прямоугольный контур площадью из A2 с одной комнатой. Места узлов у изменённого типового плана остаются как в И4, кнопка «Расставить узлы по правилам» (и план «с нуля») ставит их по правилам размещения. Площадь своей планировки фиксирована: новое число в A2 пересчитывает план с сохранением пропорций. Расчёт по своей планировке — после «Рассчитать подбор» или «Пересчитать»: пока не пересчитано, над результатом показывается уведомление, что он устарел. Код квартиры — со «*» (К3-Р-П* — изменённый типовой план, К3-*-П — с нуля). Планировка сохраняется в этом браузере, её можно сохранить в файл JSON и загрузить обратно. Чистый план без маркеров редактирования экспортируется в SVG и PNG; для PDF используется печать браузера.
+Блок «Планировка» в форме — карточки типовых квартир К1–К5 и «С нуля». «Изменить планировку» открывает конструктор с левой панелью инструментов, крупным холстом, сеткой и панелью свойств. Комнату можно нарисовать прямоугольной, квадратной или L-образной; стены, двери и окна добавляются прямо на плане. В инструменте «Сеть» можно разместить роутер, коммутатор или точку доступа, задать число портов, бюджет PoE и uplink, показать кабели и поле покрытия 5 ГГц. Стену можно перетащить мышью или пальцем (на телефоне — сначала коснитесь стены), а её тип выбрать в панели или списке участков; комнату можно разделить стеной (с дверью или без), объединить с соседним, переименовать, сменить тип. Размеры комнаты меняются кнопками с шагом 5 см, выбранное сетевое устройство — стрелками клавиатуры; устройство и окно можно добавить кнопками без мыши. «С нуля» — прямоугольный контур площадью из A2 с одной комнатой. Места узлов у изменённого типового плана остаются как в И4, кнопка «Расставить узлы по правилам» (и план «с нуля») ставит их по правилам размещения. Площадь своей планировки фиксирована: новое число в A2 пересчитывает план с сохранением пропорций. Расчёт по своей планировке — после «Рассчитать подбор» или «Пересчитать»: пока не пересчитано, над результатом показывается уведомление, что он устарел. Код квартиры — со «*» (К3-Р-П* — изменённый типовой план, К3-*-П — с нуля). Планировка сохраняется в этом браузере, её можно сохранить в файл JSON и загрузить обратно. Чистый план без маркеров редактирования экспортируется в SVG и PNG; для PDF используется печать браузера.
 
 В таблице «Подобранное оборудование» — только модели К Телеком, по порядку: «Эконом» — наименьшая стоимость владения за 5 лет, «Оптимальный» — наибольший балл S, рекомендуем, «Премиум» — наибольшая скорость в худшей зоне; если это одна и та же модель, она показывается одной строкой с несколькими метками. Кнопка «Аналоги» под моделью раскрывает параметры подбора и 2–3 примера моделей с рынка из списка «Все подходящие варианты». Если в парке нет модели, выполняющей требования уровня (например, Wi-Fi 7 для премиального), показывается ближайший вариант К Телеком — условно.
 
@@ -25,6 +25,9 @@
 .netcalc legend{font-weight:700;padding:0 .3rem}
 .netcalc .nc-row{display:flex;justify-content:space-between;align-items:center;gap:.3rem 1rem;margin:.3rem 0;flex-wrap:wrap}
 .netcalc .nc-row>span{flex:1 1 14rem}
+.netcalc .nc-row-group{align-items:flex-start}
+.netcalc .nc-group{display:flex;flex:1 1 100%;flex-wrap:wrap;gap:.35rem .6rem}
+.netcalc .nc-eirp{display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap}
 .netcalc .nc-code{display:inline-block;min-width:2.2em;font-size:.8em;color:var(--md-accent-fg-color)}
 .netcalc .nc-code:empty{display:none}
 .netcalc input[type=number],.netcalc input[type=text],.netcalc select{width:13rem;max-width:100%;padding:.25rem;border:1px solid var(--md-default-fg-color--lighter);border-radius:4px;background:var(--md-default-bg-color);color:var(--md-default-fg-color)}
@@ -32,15 +35,16 @@
 .netcalc .nc-chk{white-space:nowrap;margin-left:.6rem}
 .netcalc .nc-sub{margin:.5rem 0 .1rem}
 .netcalc .nc-own{padding:.2rem 0 0 .6rem}
-.netcalc .nc-err{color:#c62828}
-.netcalc .nc-del{border:0;background:none;color:#c62828;cursor:pointer}
+.netcalc .nc-err{color:#b71c1c}
+[data-md-color-scheme=slate] .netcalc .nc-err{color:#ff8a80}
+.netcalc .nc-del{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;min-height:1.5rem;padding:.1rem;border:0;background:none;color:inherit;cursor:pointer}
 .netcalc .nc-var table{font-size:.85em}
 .netcalc .nc-var td{vertical-align:top}
 .netcalc .nc-note{color:var(--md-default-fg-color--light)}
 .netcalc table[data-st] tr.nc-rec>td{background-color:var(--md-accent-fg-color--transparent)}
 .netcalc table[data-st] tr.nc-rec>td[data-st-pin]{background:linear-gradient(var(--md-accent-fg-color--transparent),var(--md-accent-fg-color--transparent)) var(--md-default-bg-color)}
 .netcalc .nc-badge{display:inline-block;margin-top:.2rem;padding:0 .4em;border-radius:.2rem;background:var(--md-accent-fg-color);color:var(--md-accent-bg-color);font-size:.8em;font-weight:700;white-space:nowrap}
-.netcalc .nc-badge.nc-cond{background:#ef6c00;color:#fff}
+.netcalc .nc-badge.nc-cond{background:#a84300;color:#fff}
 .netcalc .nc-an-b{margin-top:.25rem;padding:.05rem .45rem;border:.05rem solid var(--md-default-fg-color--lighter);border-radius:.2rem;background:none;color:var(--md-typeset-a-color);font:inherit;font-size:.9em;cursor:pointer;white-space:nowrap}
 .netcalc .nc-an-b:hover,.netcalc .nc-an-b:focus-visible{border-color:var(--md-accent-fg-color);color:var(--md-accent-fg-color)}
 .netcalc .nc-nw{white-space:nowrap}
@@ -84,6 +88,7 @@
 .netcalc .nc-walls ul.nc-wlist>li{display:flex;align-items:center;gap:.4rem;margin:0;line-height:1.3}
 .netcalc .nc-wl{flex:none;background:#fff;border:1px solid var(--md-default-fg-color--lightest);border-radius:2px}
 .netcalc .nc-legend i.nc-ln.nc-pl{border-top:3px dotted #6a1b9a}
+@media (pointer:coarse){.netcalc .nc-del{min-width:2.75rem;min-height:2.75rem}}
 @media print{.netcalc .nc-pvs,.netcalc .nc-pvsel,.netcalc .nc-pv-pick,.netcalc .nc-own-r select,.netcalc .nc-pv-go{display:none}}
 </style>
 <link rel="stylesheet" href="../assets/css/constructor.css">

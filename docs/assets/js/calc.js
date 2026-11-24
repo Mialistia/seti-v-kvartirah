@@ -278,19 +278,25 @@
     return "—";
   }
 
-  root.NetCalcUI = { defaults, toParams, userParams, render, planSvg, rssiColor, pick, pvDefault, pvButtons, pvLabel, planView, ownX, pvSwitch };
+  const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
+  const row = (code, label, ctl, hint = "") => `<label class="nc-row"><span><b class="nc-code">${code}</b> ${label}${hint ? ` <small>${hint}</small>` : ""}</span>${ctl}</label>`;
+  const groupRow = (label, ctl, hint = "") => `<div class="nc-row nc-row-group"><span>${label}${hint ? ` <small>${hint}</small>` : ""}</span><div class="nc-group">${ctl}</div></div>`;
+  function openPrintDetails(doc) { const closed = []; for (const d of doc.querySelectorAll("#nc-out details, #nc-gloss details")) if (!d.open) { d.open = true; closed.push(d); } return closed; }
+  function restorePrintDetails(closed) { for (const d of closed) d.open = false; }
+  root.NetCalcUI = { defaults, toParams, userParams, render, planSvg, rssiColor, pick, pvDefault, pvButtons, pvLabel, planView, ownX, pvSwitch, formHtml: form, userListHtml, openPrintDetails, restorePrintDetails };
   if (typeof document === "undefined") return;
 
   // ---------------------------------------------------------------- страница
   const SRC = document.currentScript && document.currentScript.src;   // адрес calc.js — от него ищем ../data/*.json
   const getJson = (name) => fetch(new URL("../data/" + name, SRC || location.href)).then((r) => { if (!r.ok) throw new Error(name + ": " + r.status); return r.json(); });
   let eng = null, meta = {}, users = [], lastR = null, ownPending = false, LAY = null;   // LAY — блок «Планировка» (layout-ui.js)
-  const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(t)}</option>`;
-  const row = (code, label, ctl, hint = "") => `<label class="nc-row"><span><b class="nc-code">${code}</b> ${label}${hint ? ` <small>${hint}</small>` : ""}</span>${ctl}</label>`;
+let printClosed = [];
+root.addEventListener("beforeprint", () => { printClosed = openPrintDetails(document); });
+root.addEventListener("afterprint", () => { restorePrintDetails(printClosed); printClosed = []; });
   function form(plans) {
     const d = defaults(), W = plans.WT, PL = NE.PLAN_OF;
     const lv = (n) => { const L = NE.LEVELS[n]; return `${L.name} — K ≥ ${L.K} %, TCP ≥ ${L.TCP} Мбит/с`; };
-    return `<form id="nc-form" novalidate onsubmit="return false">
+    return `<form id="nc-form" novalidate onsubmit="return false" aria-describedby="nc-err">
 <fieldset><legend>Квартира (блоки A, B чек-листа)${q("codes")}</legend>
 ${row("A3", "Число комнат" + q("cls"), `<select name="rooms">${[0, 1, 2, 3, 4, 5].map((n) => opt(n, n ? n : "студия", String(n) === d.rooms)).join("")}</select>`)}
 ${row("A2", "Общая площадь, м²" + q("k"), `<input name="area" type="number" min="15" max="300" step="0.1" placeholder="как в типовом плане">`, "пусто — площадь типового плана")}
@@ -324,21 +330,21 @@ ${row("G2", "Бюджет на оборудование и монтаж, ₽" + 
 ${row("", "Название *", `<input name="u_name" type="text" maxlength="80" placeholder="например, TP-Link Archer AX55">`)}
 ${row("", "Тип *", `<select name="u_type">${USER_TYPES.map((t, i) => opt(t, t, !i)).join("")}</select>`)}
 ${row("", "Стандарт Wi-Fi *" + q("std"), `<select name="u_std">${["4", "5", "6", "6E", "7"].map((s) => opt(s, "Wi-Fi " + s, s === "6")).join("")}</select>`)}
-${row("", "Диапазоны *", BANDS.map((b) => `<span class="nc-chk"><input type="checkbox" name="u_band" value="${b}"${b !== "6" ? " checked" : ""}> ${b} ГГц</span>`).join(" "))}
+${groupRow("Диапазоны *", BANDS.map((b) => `<label class="nc-chk"><input type="checkbox" name="u_band" value="${b}" aria-label="Диапазон ${b} ГГц"${b !== "6" ? " checked" : ""}> ${b} ГГц</label>`).join(" "))}
 ${row("", "WAN, Мбит/с *" + q("wan"), `<select name="u_wan">${[100, 1000, 2500, 5000, 10000].map((w) => opt(w, w, w === 1000)).join("")}</select>`)}
 ${row("", "LAN, шт *" + q("lan"), `<input name="u_lan" type="number" min="0" max="16" value="4">`)}
 ${row("", "Класс скорости" + q("scls"), `<select name="u_cls">${opt("", "не знаю — по стандарту", true)}${Object.keys(NE.CLASS_DEF).map((c) => opt(c, c)).join("")}</select>`)}
-${row("", "ЭИИМ 2,4 / 5 / 6 ГГц, дБм" + q("eirp"), BANDS.map((b) => `<input name="u_e${b}" type="number" min="0" max="36" step="0.5" class="nc-s" placeholder="${b}">`).join(" "), "из datasheet; пусто — по умолчанию")}
+${groupRow("ЭИИМ 2,4 / 5 / 6 ГГц, дБм" + q("eirp"), BANDS.map((b) => `<label class="nc-eirp">${b} ГГц <input name="u_e${b}" type="number" min="0" max="36" step="0.5" class="nc-s" placeholder="${b}" aria-label="ЭИИМ ${b} ГГц, дБм"></label>`).join(" "), "из datasheet; пусто — по умолчанию")}
 ${row("", "Mesh-протокол" + q("mesh"), `<select name="u_mesh">${opt("", "не знаю / нет", true)}${MESH.map((m) => opt(m, m)).join("")}</select>`, "без Mesh считается только один узел")}
 ${row("", "Узлов в комплекте", `<input name="u_u" type="number" min="1" max="6" value="1">`)}
 ${row("", "Цена комплекта, ₽" + q("est"), `<input name="u_price" type="number" min="0" step="100" placeholder="медиана рынка по классу">`)}
 ${row("", "Уже куплено (первый узел есть)" + q("capex"), `<input name="u_owned" type="checkbox" checked>`)}
-<p><button type="button" id="nc-uadd" class="md-button">Добавить в расчёт</button> <span id="nc-umsg" class="nc-err"></span></p>
+<p><button type="button" id="nc-uadd" class="md-button">Добавить в расчёт</button> <span id="nc-umsg" class="nc-err" role="status" aria-live="polite"></span></p>
 <ul id="nc-ulist"></ul>
 </div></details>
 </fieldset>
 <p><button id="nc-run" class="md-button md-button--primary" type="submit">Рассчитать</button> <a id="nc-json" href="#" hidden>Скачать расчёт (JSON)</a></p>
-<div id="nc-err" class="nc-err"></div>
+<div id="nc-err" class="nc-err" role="alert" aria-live="assertive" tabindex="-1"></div>
 </form>
 <div id="nc-out"></div>`;
   }
@@ -356,16 +362,17 @@ ${row("", "Уже куплено (первый узел есть)" + q("capex"),
       wan: v("u_wan"), lan: v("u_lan"), cls: v("u_cls"), eirp: Object.fromEntries(BANDS.map((b) => [b, v("u_e" + b)])), mesh: v("u_mesh"),
       u: v("u_u"), price: v("u_price"), owned: fe.elements.u_owned.checked };
   }
-  function showUsers(el) {
-    el.querySelector("#nc-ulist").innerHTML = users.map((u, i) => `<li>${esc(u.name)} — ${esc(u.type)}, Wi-Fi ${esc(u.std)}, ${u.bands.map(esc).join(" / ")} ГГц, WAN ${esc(u.wan)}` +
-      `${u.owned ? ", уже есть" : ""} <button type="button" class="nc-del" data-i="${i}" title="Убрать">✕</button></li>`).join("");
+  function userListHtml(list) {
+    return list.map((u, i) => `<li>${esc(u.name)} — ${esc(u.type)}, Wi-Fi ${esc(u.std)}, ${u.bands.map(esc).join(" / ")} ГГц, WAN ${esc(u.wan)}` +
+      `${u.owned ? ", уже есть" : ""} <button type="button" class="nc-del" data-i="${i}" title="Убрать" aria-label="Убрать ${esc(u.name)}">✕</button></li>`).join("");
   }
+  function showUsers(el) { el.querySelector("#nc-ulist").innerHTML = userListHtml(users); }
   // o.pick — сразу показать на плане вариант с этим id («Свой выбор»); o.scroll: "res" (по умолчанию), "pv" — к плану, "" — не прокручивать
   function run(el, o = {}) {
     const fe = el.querySelector("#nc-form"), out = el.querySelector("#nc-out"), er = el.querySelector("#nc-err"), dl = el.querySelector("#nc-json");
     const { p, err } = toParams(readForm(fe));
     er.innerHTML = err.map(esc).join("<br>");
-    if (err.length) { out.innerHTML = ""; dl.hidden = true; lastR = null; return null; }
+    if (err.length) { out.innerHTML = ""; dl.hidden = true; lastR = null; er.focus({ preventScroll: true }); return null; }
     try { lastR = eng.calc(p); } catch (e) { er.textContent = "Ошибка расчёта: " + e.message; out.innerHTML = ""; dl.hidden = true; lastR = null; return null; }
     out.innerHTML = render(lastR, meta);
     dl.hidden = false;
