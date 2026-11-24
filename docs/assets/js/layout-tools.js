@@ -100,7 +100,7 @@
       bg.setAttribute("x", vb[0]); bg.setAttribute("y", vb[1]); bg.setAttribute("width", vb[2]); bg.setAttribute("height", vb[3]); bg.setAttribute("fill", "#fff");
       c.insertBefore(bg, c.firstChild);
       const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-      style.textContent = "text{font-family:Arial,sans-serif;text-anchor:middle;dominant-baseline:central}.kq-room{font-weight:700;fill:#212121;paint-order:stroke;stroke:#fff;stroke-width:5px}.kq-area{font-size:.8em;fill:#455a64;paint-order:stroke;stroke:#fff;stroke-width:4px}.kq-out,.kq-dim{font-size:.8em;fill:#546e7a}.kq-node,.kq-hd{font-weight:700;fill:#fff}.kq-tip{font-weight:700;fill:#bf360c;paint-order:stroke;stroke:#fff;stroke-width:4px}";
+      style.textContent = "text{font-family:Arial,sans-serif;text-anchor:middle;dominant-baseline:central}.kq-room{font-weight:700;fill:#212121;paint-order:stroke;stroke:#fff;stroke-width:5px}.kq-area{font-size:.8em;fill:#455a64;paint-order:stroke;stroke:#fff;stroke-width:4px}.kq-out,.kq-dim{font-size:.8em;fill:#546e7a}.kq-node,.kq-hd{font-weight:700;fill:#fff}.kq-device-name{font-size:.72em;font-weight:600;fill:#263238;paint-order:stroke;stroke:#fff;stroke-width:4px}.kq-tip{font-weight:700;fill:#bf360c;paint-order:stroke;stroke:#fff;stroke-width:4px}";
       c.insertBefore(style, c.firstChild);
       return new XMLSerializer().serializeToString(c);
     }
