@@ -8,7 +8,7 @@ await import("../docs/assets/js/layout.js");
 await import("../docs/assets/js/layout-ui.js");   // без DOM ничего не делает — проверка синтаксиса
 await import("../docs/assets/js/layout-img.js");
 await import("../docs/assets/js/layout-tools.js");
-await import("../docs/assets/js/layout-net.js");
+await import("../docs/assets/js/layout-network.js");
 await import("../docs/assets/js/calc.js");
 const NE = globalThis.NetEngine, UI = globalThis.NetCalcUI, GL = globalThis.NetGlossary, LA = globalThis.NetLayout;
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
